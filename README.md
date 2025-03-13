@@ -12,3 +12,10 @@
 > - Open and choose **REPO.exe** and **cheat dll**.
 ### 🙅 DISCLAIMER: 
 > - This is just an "automated" launcher. Any inject failure issues are due to the injector and the injector dll. Completely "unrelated" to the launcher. We only take responsibility for errors related to our launcher.
+### Build from source
+Recommend: Python 3.11
+
+Command:
+```bash
+git clone https://github.com/sang765/DARK-Launcher-Open.git; cd DARK-Launcher-Open; pip install -r requirements.txt; python py2exe.py
+```
