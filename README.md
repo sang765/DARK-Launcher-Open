@@ -1,3 +1,4 @@
+![Untitled-1](https://github.com/user-attachments/assets/4b660853-bc07-4432-b335-c765c89d5972)
 # 🌑 __D.A.R.K Launcher__ [Official Launcher]
 ### ⚠️ IMPORTANT
 > - Before downloading or using our loader, launcher, please remember to __turn off Real Time Protection__ or add the folder containing our loader, launcher to the __whitelist__ on your Anti Virus. Rest assured, our Loader and Launcher are **"COMPLETELY SAFE"** and **do not** steal any of your personal information.
