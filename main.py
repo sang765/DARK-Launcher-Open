@@ -438,19 +438,31 @@ def countdown_window(config):
     root.mainloop()
 
 def run_countdown_and_inject(config):
-    countdown_thread = threading.Thread(target=countdown_window, args=(config,), daemon=True)
-    countdown_thread.start()
-    
-    time.sleep(config["inject_wait_time"])
-    
-    if perform_injection(config):
-        show_inject_success(config)
-        print(f"{Fore.GREEN}🎉 DLL has been successfully injected into REPO!{Style.RESET_ALL}")
+    repo_name = "REPO"
+    if is_process_running(repo_name):
+        print(f"{Fore.GREEN}✅ REPO is already running. Injecting immediately...{Style.RESET_ALL}")
+        if perform_injection(config):
+            show_inject_success(config)
+            print(f"{Fore.GREEN}🎉 DLL has been successfully injected into REPO!{Style.RESET_ALL}")
+        else:
+            config["auto_inject_failed"] = True
+            config["auto_inject"] = False
+            save_config(config)
+            print(f"{Fore.RED}❌ Auto injection failed. Disabled auto_inject.{Style.RESET_ALL}")
     else:
-        config["auto_inject_failed"] = True
-        config["auto_inject"] = False
-        save_config(config)
-        print(f"{Fore.RED}❌ Auto injection failed. Disabled auto_inject.{Style.RESET_ALL}")
+        countdown_thread = threading.Thread(target=countdown_window, args=(config,), daemon=True)
+        countdown_thread.start()
+        
+        time.sleep(config["inject_wait_time"])
+        
+        if perform_injection(config):
+            show_inject_success(config)
+            print(f"{Fore.GREEN}🎉 DLL has been successfully injected into REPO!{Style.RESET_ALL}")
+        else:
+            config["auto_inject_failed"] = True
+            config["auto_inject"] = False
+            save_config(config)
+            print(f"{Fore.RED}❌ Auto injection failed. Disabled auto_inject.{Style.RESET_ALL}")
 
 def start_game(config):
     steam_app_id = "3241660"
@@ -979,6 +991,7 @@ def main():
             if is_process_running(repo_name):
                 run_countdown_and_inject(config)
             else:
+                print(f"{Fore.YELLOW}🚀 Game not running. Starting REPO.exe...{Style.RESET_ALL}")
                 start_game(config)
                 if wait_for_process(repo_name):
                     if not NO_CONSOLE_MODE:
