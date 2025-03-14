@@ -15,13 +15,13 @@ VSVersionInfo(
       StringTable(
         u'040904B0',
         [
-        StringStruct(u'FileDescription', u'Automatic inject launcher for REPO'),
-        StringStruct(u'FileVersion', u'1.0.0.0'),
+        StringStruct(u'FileDescription', u'D.A.R.K Launcher (Inject Launcher)'),
+        StringStruct(u'FileVersion', u'1.0.0.1'),
         StringStruct(u'ProductName', u'D.A.R.K REPO'),
-        StringStruct(u'ProductVersion', u'1.0'),
-        StringStruct(u'LegalCopyright', u'© 2025 SengsDayy'),
+        StringStruct(u'ProductVersion', u'1.1'),
+        StringStruct(u'LegalCopyright', u'© 2025 SengsDeyy'),
         StringStruct(u'CompanyName', u'D.A.R.K REPO'),
-        StringStruct(u'InternalName', u'SengsDayy'),
+        StringStruct(u'InternalName', u'SengsDeyy'),
         StringStruct(u'OriginalFilename', u'D.A.R.K Launcher.exe')
         ]
       )
