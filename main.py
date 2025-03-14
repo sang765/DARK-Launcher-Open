@@ -28,7 +28,7 @@ init()
 
 NO_INJECT_MODE = "--no-inject" in sys.argv
 NO_CONSOLE_MODE = "--no-console" in sys.argv
-ASSETS_DIR = "assets"
+
 DWMWA_USE_IMMERSIVE_DARK_MODE = 20
 DWMWA_MICA_EFFECT = 1029
 
@@ -144,9 +144,6 @@ def format_size(size):
 
 def download_file(url, filename, config=None):
     try:
-        os.makedirs(ASSETS_DIR, exist_ok=True)
-        filepath = os.path.join(ASSETS_DIR, filename)
-        
         response = requests.get(url, stream=True)
         response.raise_for_status()
         total_size = int(response.headers.get('content-length', 0))
@@ -154,12 +151,12 @@ def download_file(url, filename, config=None):
         start_time = time.time()
 
         bar_length = 30
-        print(f"{Fore.CYAN}⬇ Downloading {filename} to {ASSETS_DIR}...{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}⬇ Downloading {filename}...{Style.RESET_ALL}")
 
-        if not os.access(ASSETS_DIR, os.W_OK):
-            raise PermissionError(f"No write permission for directory {ASSETS_DIR}")
+        if not os.access(os.path.dirname(filename) or '.', os.W_OK):
+            raise PermissionError(f"No write permission for directory of {filename}")
 
-        with open(filepath, 'wb') as f:
+        with open(filename, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
                 if chunk:
                     f.write(chunk)
@@ -186,7 +183,7 @@ def download_file(url, filename, config=None):
         else:
             print(f"{Fore.GREEN}✅ Download completed (size unknown) in {time.time() - start_time:.1f}s{Style.RESET_ALL}")
 
-        return os.path.getsize(filepath)
+        return os.path.getsize(filename)
 
     except requests.RequestException as e:
         print(f"{Fore.RED}❌ Network error downloading {filename}: {e}{Style.RESET_ALL}")
@@ -202,19 +199,17 @@ def download_file(url, filename, config=None):
         return 0
 
 def compute_file_hash(filename):
-    filepath = os.path.join(ASSETS_DIR, filename)
     hash_md5 = hashlib.md5()
-    with open(filepath, "rb") as f:
+    with open(filename, "rb") as f:
         for chunk in iter(lambda: f.read(4096), b""):
             hash_md5.update(chunk)
     return hash_md5.hexdigest()
 
 def parse_version_file():
-    version_file = os.path.join(ASSETS_DIR, "version.txt")
-    if not os.path.exists(version_file):
+    if not os.path.exists("version.txt"):
         return None, None, {}
     
-    with open(version_file, "r") as f:
+    with open("version.txt", "r") as f:
         content = f.read().strip().splitlines()
     
     version = None
@@ -234,9 +229,7 @@ def parse_version_file():
     return version, title, files
 
 def write_version_file(version, title, files):
-    version_file = os.path.join(ASSETS_DIR, "version.txt")
-    os.makedirs(ASSETS_DIR, exist_ok=True)
-    with open(version_file, "w") as f:
+    with open("version.txt", "w") as f:
         f.write("-------------------------\n")
         f.write(f"version: {version}\n")
         f.write(f"title: {title}\n")
@@ -257,16 +250,13 @@ def check_and_update(config):
     print(f"{Fore.CYAN}🔍 Checking for updates...{Style.RESET_ALL}")
     logging.info("Checking for updates")
 
-    os.makedirs(ASSETS_DIR, exist_ok=True)
-
     if local_version != github_version or local_title != github_title:
         print(f"{Fore.YELLOW}🔄 Update detected: Version ({local_version} ≠ {github_version}) or Title ({local_title} ≠ {github_title}). Updating all files...{Style.RESET_ALL}")
         logging.info(f"Update detected: local_version={local_version}, github_version={github_version}, local_title={local_title}, github_title={github_title}")
         for filename in expected_files:
-            filepath = os.path.join(ASSETS_DIR, filename)
-            if os.path.exists(filepath):
-                os.remove(filepath)
-                print(f"{Fore.RED}🗑️ Deleted local file: {filepath}{Style.RESET_ALL}")
+            if os.path.exists(filename):
+                os.remove(filename)
+                print(f"{Fore.RED}🗑️ Deleted local file: {filename}{Style.RESET_ALL}")
         
         new_files = {}
         for filename in expected_files:
@@ -285,21 +275,20 @@ def check_and_update(config):
     new_files = local_files.copy()
     
     for filename in expected_files:
-        filepath = os.path.join(ASSETS_DIR, filename)
         if filename not in github_assets:
             if filename in local_files:
                 print(f"{Fore.YELLOW}⚠ File {filename} not found in GitHub release. Replacing...{Style.RESET_ALL}")
-                os.remove(filepath)
+                os.remove(filename)
                 logging.info(f"Deleted outdated file: {filename}")
             continue
         
         github_size = github_assets[filename]['size']
         local_size = local_files.get(filename, -1)
         
-        if not os.path.exists(filepath) or local_size != github_size:
+        if not os.path.exists(filename) or local_size != github_size:
             print(f"{Fore.YELLOW}🔧 File {filename} size mismatch (local={local_size}, github={github_size}). Repairing...{Style.RESET_ALL}")
-            if os.path.exists(filepath):
-                os.remove(filepath)
+            if os.path.exists(filename):
+                os.remove(filename)
                 logging.info(f"Deleted mismatched file: {filename}")
             download_url = github_assets[filename]['browser_download_url']
             size = download_file(download_url, filename, config)
@@ -309,9 +298,8 @@ def check_and_update(config):
     
     for local_file in local_files:
         if local_file not in expected_files:
-            filepath = os.path.join(ASSETS_DIR, local_file)
             print(f"{Fore.YELLOW}⚠ Unexpected file {local_file} found locally. Removing...{Style.RESET_ALL}")
-            os.remove(filepath)
+            os.remove(local_file)
             del new_files[local_file]
             updated = True
             logging.info(f"Removed unexpected file: {local_file}")
@@ -325,8 +313,7 @@ def check_and_update(config):
         print(f"{Fore.CYAN}📋 Verifying file integrity for version {github_version} (Title: {github_title})...{Style.RESET_ALL}")
         all_valid = True
         for filename in expected_files:
-            filepath = os.path.join(ASSETS_DIR, filename)
-            if filename in local_files and os.path.exists(filepath):
+            if filename in local_files and os.path.exists(filename):
                 local_size = local_files[filename]
                 github_size = github_assets[filename]['size']
                 local_hash = compute_file_hash(filename)
@@ -357,6 +344,7 @@ def load_config():
         "last_version_check": 0,
         "use_steam": False,
         "auto_close_after_inject": False,
+        "notes": ""
     }
     if os.path.exists("config.json"):
         try:
@@ -480,9 +468,8 @@ def ensure_log_directory():
 
 def perform_injection(config):
     dll_name = os.path.basename(config["dll_path"])
-    dll_path = os.path.join(ASSETS_DIR, dll_name)  # Đảm bảo DLL được lấy từ assets nếu cần
     repo_name = "REPO"
-    inject_cmd = f'smi.exe inject -p {repo_name} -a "{dll_path}" -n r.e.p.o_cheat -c Loader -m Init'
+    inject_cmd = f'smi.exe inject -p {repo_name} -a "{dll_name}" -n r.e.p.o_cheat -c Loader -m Init'
     
     disclaimer = (
         f"{Fore.YELLOW}⚠ DISCLAIMER: This is just an \"automated\" launcher. Any inject failure issues are due to "
@@ -491,10 +478,10 @@ def perform_injection(config):
     )
     print(disclaimer)
     
-    print(f"{Fore.YELLOW}💉 Injecting DLL from {dll_path}...{Style.RESET_ALL}")
+    print(f"{Fore.YELLOW}💉 Injecting DLL...{Style.RESET_ALL}")
     logging.info(f"Starting injection: {inject_cmd}")
     
-    result = subprocess.run(inject_cmd, shell=True, capture_output=True, text=True, cwd=ASSETS_DIR)
+    result = subprocess.run(inject_cmd, shell=True, capture_output=True, text=True)
     
     if result.returncode != 0:
         timestamp = time.strftime("%Y%m%d_%H%M%S")
@@ -515,18 +502,17 @@ def perform_injection(config):
     logging.info(f"Injection successful for {dll_name} into {repo_name}")
     return True
 
-def is_valid_dll(dll_path):
-    try:
-        if not os.path.isabs(dll_path) and os.path.exists(os.path.join(ASSETS_DIR, dll_path)):
-            dll_path = os.path.join(ASSETS_DIR, dll_path)
-        with open(dll_path, 'rb') as f:
-            header = f.read(2)
-            if header != b'MZ':
-                return False
-        return os.path.getsize(dll_path) > 0
-    except Exception as e:
-        logging.error(f"DLL validation failed: {e}")
-        return False
+def download_dll(url, config):
+    filename = os.path.basename(url) if url.endswith('.dll') else "downloaded.dll"
+    print(f"{Fore.CYAN}Downloading DLL from {url}...{Style.RESET_ALL}")
+    logging.info(f"Downloading DLL from {url}")
+    download_file(url, filename, config)
+    if is_valid_dll(filename):
+        config["dll_path"] = os.path.abspath(filename)
+        save_config(config)
+        print(f"{Fore.GREEN}DLL downloaded successfully to {config['dll_path']}!{Style.RESET_ALL}")
+    else:
+        print(f"{Fore.RED}❌ Downloaded DLL is invalid!{Style.RESET_ALL}")
 
 def kill_game():
     for proc in psutil.process_iter(['name']):
@@ -544,7 +530,7 @@ usage = {
     "auto_inject": "auto_inject (-aj) [True/False] [time]: Toggle or set auto inject.",
     "inject_wait_time": "inject_wait_time (-iwt): Open UI to set inject wait time.",
     "status": "status (-s): Show current configuration and game status.",
-    "download_dll": "download_dll (-ddl) <url> [--no-config]: Download a DLL from a URL to assets folder. Use --no-config to avoid updating config."
+    "download_dll": "download_dll (-ddl) <url>: Download a DLL from a URL."
 }
 
 def show_usage(command, config):
@@ -674,43 +660,16 @@ def handle_commands(command, config):
             print(f"  Auto Inject Failed: {config.get('auto_inject_failed', False)}")
             print(f"  Auto Close After Inject: {config['auto_close_after_inject']}")
             print(f"  Last Version Check: {int(time.time() - config['last_version_check'])}s ago")
+            print(f"  Notes: {config.get('notes', 'No notes')}")
 
         elif action in ("download_dll", "-ddl"):
-            if len(parts) < 2 or len(parts) > 3:
+            if len(parts) != 2:
                 show_usage("download_dll", config)
             else:
-                url = parts[1]
-                update_config = "--no-config" not in parts
-                dll_path = download_dll(url, config, update_config)
-                if dll_path and not NO_CONSOLE_MODE:
-                    print(f"{Fore.CYAN}💡 You can now use 'inject' to inject {dll_path}{Style.RESET_ALL}")
+                download_dll(parts[1], config)
 
-def download_dll(url, config, update_config=True):
-    if url.endswith('.dll'):
-        filename = os.path.basename(url)
-    else:
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        filename = f"custom_dll_{timestamp}.dll"
-    
-    print(f"{Fore.CYAN}⬇ Downloading DLL from {url} to {ASSETS_DIR}/{filename}...{Style.RESET_ALL}")
-    logging.info(f"Downloading DLL from {url} to {filename}")
-    
-    size = download_file(url, filename, config)
-    dll_path = os.path.join(ASSETS_DIR, filename)
-    
-    if size > 0 and is_valid_dll(dll_path):
-        print(f"{Fore.GREEN}✅ DLL downloaded successfully to {dll_path}! Size: {format_size(size)}{Style.RESET_ALL}")
-        if update_config:
-            config["dll_path"] = dll_path
-            save_config(config)
-            print(f"{Fore.GREEN}✅ Updated config with new DLL path: {dll_path}{Style.RESET_ALL}")
-        return dll_path
-    else:
-        print(f"{Fore.RED}❌ Downloaded DLL is invalid or failed to download!{Style.RESET_ALL}")
-        if os.path.exists(dll_path):
-            os.remove(dll_path)
-            print(f"{Fore.YELLOW}🗑️ Removed invalid file: {dll_path}{Style.RESET_ALL}")
-        return None
+        else:
+            show_usage(cmd, config)
 
 def get_windows_wallpaper():
     try:
@@ -824,7 +783,7 @@ def config_gui(config):
     Label(root, text="DLL Path:").grid(row=1, column=0, padx=5, pady=5)
     dll_entry = ttk.Entry(root, width=50)
     dll_entry.grid(row=1, column=1, padx=5, pady=5)
-    default_dll = os.path.join(ASSETS_DIR, "r.e.p.o.cheat.dll")
+    default_dll = os.path.abspath("r.e.p.o.cheat.dll")
     if os.path.exists(default_dll) and is_valid_dll(default_dll):
         dll_entry.insert(0, default_dll)
     else:
