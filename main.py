@@ -12,6 +12,10 @@ import winsound
 import hashlib
 import shutil
 import threading
+import winreg
+import win32gui
+import win32con
+import win32api
 from concurrent.futures import ThreadPoolExecutor
 from tkinter import filedialog, messagebox, Tk, Label, Checkbutton, Entry, simpledialog
 import ttkbootstrap as ttk
@@ -19,10 +23,7 @@ from ttkbootstrap.constants import *
 from colorama import init, Fore, Style
 from PIL import Image, ImageTk
 from pathlib import Path
-import winreg
-import win32gui
-import win32con
-import win32api
+
 
 init()
 
@@ -815,25 +816,20 @@ def config_gui(config):
     root.mainloop()
     return config
 
-def handle_commands_thread(config):
-    def command_loop():
-        print(f"{Fore.YELLOW}⚙ Enter commands below (type 'help' for list, 'exit' to quit):{Style.RESET_ALL}")
-        while True:
-            try:
-                if not is_process_running("REPO"):
-                    print(f"{Fore.RED}❌ Game (REPO) has exited.{Style.RESET_ALL}")
-                command = input("> ")
-                handle_commands(command, config)
-            except EOFError:
-                print(f"{Fore.YELLOW}⚠ Console input closed. Exiting command loop...{Style.RESET_ALL}")
-                break
-            except Exception as e:
-                print(f"{Fore.RED}❌ Error in command loop: {e}{Style.RESET_ALL}")
-                break
-    
-    thread = threading.Thread(target=command_loop, daemon=True)
-    thread.start()
-    return thread
+def handle_commands_loop(config):
+    print(f"{Fore.YELLOW}⚙ Enter commands below (type 'help' for list, 'exit' to quit):{Style.RESET_ALL}")
+    while True:
+        try:
+            if not is_process_running("REPO"):
+                print(f"{Fore.RED}❌ Game (REPO) has exited.{Style.RESET_ALL}")
+            command = input("> ")
+            handle_commands(command, config)
+        except EOFError:
+            print(f"{Fore.YELLOW}⚠ Console input closed. Exiting command loop...{Style.RESET_ALL}")
+            break
+        except Exception as e:
+            print(f"{Fore.RED}❌ Error in command loop: {e}{Style.RESET_ALL}")
+            break
 
 def run_launcher(config):
     setup_logging()
@@ -941,8 +937,7 @@ def main():
                         print(f"{Fore.RED}❌ Auto injection failed. Disabled auto_inject.{Style.RESET_ALL}")
 
         if not NO_CONSOLE_MODE:
-            command_thread = handle_commands_thread(config)
-            command_thread.join()
+            handle_commands_loop(config)
 
     except Exception as e:
         if not NO_CONSOLE_MODE:
