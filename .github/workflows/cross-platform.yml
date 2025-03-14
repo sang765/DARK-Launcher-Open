@@ -1,0 +1,39 @@
+name: Cross-Platform Test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        python-version: ['3.11']
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests psutil ttkbootstrap colorama pillow pyperclip python-dotenv
+
+      - name: Run main.py with Mock
+        run: |
+          python main.py --no-inject --no-console
+        env:
+          PYTHONPATH: .
+        continue-on-error: true

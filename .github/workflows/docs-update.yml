@@ -1,0 +1,42 @@
+name: Update Docs
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '**.py'
+      - 'release.md'
+  workflow_dispatch:
+
+jobs:
+  update-docs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: |
+          pip install pyperclip python-dotenv
+
+      - name: Simulate Build to Update Release.md
+        run: |
+          echo "Simulating build..."
+          python py2exe.py --skip-build --skip-sign --skip-upload
+
+      - name: Commit Changes
+        run: |
+          git config user.name "GitHub Action"
+          git config user.email "action@github.com"
+          git add Release.md README.md
+          git commit -m "Update Release.md and README.md with latest build info" || echo "No changes to commit"
+          git push

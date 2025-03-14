@@ -45,6 +45,23 @@ Also checkout: https://github.com/D4rkks/r.e.p.o-cheat
 
 ---
 
+## 📦 Latest Release
+### File Hash:
+> - MD5: **45d0c5192105d3f499ff362fa4bfcd3e**
+> - SHA-1: **ed79d5e8b4300c4711b79e864fada4b683aecaf3**
+> - SHA-256: **1c7f3f4ce2d9b0a1b161ac233c401aa1a5a8ccd6baa9e7bfb9e91f7b4f957d66**
+
+### File Information:
+> - 🆙 Last Update: **<t:1741923521>**
+> - 📦 Size: **21.78 MB**
+> - ⬇️ **[Download](<https://i.love-your.mom/f/1tWow51deIj>)**
+> - 🐈 [Source](<https://github.com/sang765/DARK-Launcher-Open>)
+> - 📽️ Preview: https://your.mom-is.art/f/H-tZ8Mvzzr1
+
+**Install certificate here (optional)**: <https://easyfiles.cc/Rf_OUvApAuS>
+
+---
+
 ## 🙅 Disclaimer
 This is an **automated launcher**. Any injection failures are due to the injector (`smi.exe`) or DLL (`r.e.p.o.cheat.dll`), not the launcher itself. We only take responsibility for launcher-specific errors.
 

@@ -1,0 +1,65 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller requests psutil ttkbootstrap colorama pillow pyperclip python-dotenv
+
+      - name: Install Windows SDK
+        run: |
+          choco install windows-sdk-10-version-2004-all -y
+        shell: powershell
+
+      - name: Create .env
+        run: |
+          echo UPLOAD_URL=${{ secrets.UPLOAD_URL }} >> .env
+          echo UPLOAD_TOKEN=${{ secrets.UPLOAD_TOKEN }} >> .env
+          echo SIGNTOOL_PATH="C:\Program Files (x86)\Windows Kits\10\bin\10.0.18362.0\x64\signtool.exe" >> .env
+          echo CERT_FILE=certificate.pfx >> .env
+          echo CERT_PASSWORD=${{ secrets.CERT_PASSWORD }} >> .env
+          echo DIST_PATH=dist >> .env
+          echo BACKUP_PATH=backup >> .env
+          echo EXE_NAME="D.A.R.K Launcher.exe" >> .env
+          echo MAX_BACKUPS=10 >> .env
+
+      - name: Add Certificate from Secrets
+        run: |
+          echo "${{ secrets.CERTIFICATE_BASE64 }}" | base64 -d > certificate.pfx
+        shell: powershell
+
+      - name: Ensure icon.ico
+        run: |
+          if not exist icon.ico echo "Dummy icon" > icon.ico
+
+      - name: Build
+        run: |
+          python build.py
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/D.A.R.K Launcher.exe
+          name: "D.A.R.K Launcher ${{ github.ref_name }}"
+          body_path: release.md
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
