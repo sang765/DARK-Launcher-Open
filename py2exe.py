@@ -167,9 +167,15 @@ def backup_and_build(max_backups=None, skip_steps=None):
             return
         
         pyinstaller_cmd = [
-            "pyinstaller", "--onefile", "--console", "--uac-admin",
-            "--add-data", "icon.ico;.", "-n", "D.A.R.K Launcher",
-            "--icon=icon.ico", "main.py"
+            "pyinstaller",
+            "--onefile",              
+            "--console",             
+            "--uac-admin",           
+            "--add-data", "manifest.xml;.",  
+            "--add-data", "icon.ico;.",      
+            "-n", "D.A.R.K Launcher",        
+            "--icon", "icon.ico",            
+            "main.py"                        
         ]
         
         logger.info("Building new EXE...")

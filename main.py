@@ -8,11 +8,11 @@ import psutil
 import ctypes
 import logging
 import re
-import winsound
 import hashlib
 import shutil
 import threading
 import winreg
+import glob
 import win32gui
 import win32con
 import win32api
@@ -23,7 +23,6 @@ from ttkbootstrap.constants import *
 from colorama import init, Fore, Style
 from PIL import Image, ImageTk
 from pathlib import Path
-
 
 init()
 
@@ -72,6 +71,28 @@ def setup_logging():
         print(f"{Fore.RED}❌ Failed to setup logging: {e}{Style.RESET_ALL}")
         raise
 
+def is_windows_terminal_installed():
+    try:
+        result = subprocess.run(['where', 'wt'], capture_output=True, text=True, shell=True)
+        if result.returncode == 0 and result.stdout.strip():
+            wt_path = result.stdout.strip().splitlines()[0]
+            if os.path.exists(wt_path):
+                return wt_path
+
+        wt_path = os.path.join(os.getenv("LocalAppData"), "Microsoft", "WindowsApps", "wt.exe")
+        if os.path.exists(wt_path):
+            return wt_path
+        
+        wt_path = os.path.join(os.getenv("ProgramFiles"), "WindowsApps", "Microsoft.WindowsTerminal_*", "wt.exe")
+        for path in glob.glob(wt_path):
+            if os.path.exists(path):
+                return path
+        
+        return None
+    except Exception as e:
+        print(f"{Fore.YELLOW}⚠ Cannot check Windows Terminal: {e}{Style.RESET_ALL}")
+        return None
+
 def is_admin():
     return ctypes.windll.shell32.IsUserAnAdmin() != 0
 
@@ -82,46 +103,32 @@ def is_uac_enabled():
         winreg.CloseKey(key)
         return enable_lua == 1
     except Exception as e:
-        print(f"{Fore.YELLOW}⚠ Could not determine UAC status: {e}. Assuming UAC is enabled.{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}⚠ Unable to determine UAC state: {e}. Assumed UAC is enabled.{Style.RESET_ALL}")
         return True
 
 def run_as_admin():
     if not is_admin():
         try:
             uac_enabled = is_uac_enabled()
-            if not uac_enabled:
-                print(f"{Fore.YELLOW}⚠ UAC is disabled. Launching CMD with admin privileges...{Style.RESET_ALL}")
-                cmd_command = f'cmd.exe /c start "" "{sys.executable}" {" ".join(sys.argv)}'
-                ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", f'/c "{cmd_command}"', None, 1)
-                sys.exit(0)
+            exe_path = sys.executable
+            args = " ".join(sys.argv)
+            
+            wt_path = is_windows_terminal_installed()
+            
+            if wt_path:
+                cmd = f'"{exe_path}" {args}'
+                print(f"{Fore.YELLOW}⚠ Requesting admin rights via Windows Terminal...{Style.RESET_ALL}")
+                ctypes.windll.shell32.ShellExecuteW(None, "runas", wt_path, f'-p "Command Prompt" /c {cmd}', None, 1)
             else:
-                root = Tk()
-                root.withdraw()
-                icon_path = setup_icon()
-                if icon_path:
-                    try:
-                        root.iconbitmap(icon_path)
-                    except Exception as e:
-                        print(f"{Fore.YELLOW}⚠ Failed to load icon at {icon_path}: {e}{Style.RESET_ALL}")
-                retry = messagebox.askretrycancel(
-                    "Admin Rights Required",
-                    "This program requires Administrator privileges to function correctly.\n\nClick 'Retry' to run as admin, or 'Cancel' to exit."
-                )
-                root.destroy()
-
-                if retry:
-                    print(f"{Fore.YELLOW}⚠ Relaunching with admin privileges...{Style.RESET_ALL}")
-                    ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, " ".join(sys.argv), None, 1)
-                    sys.exit(0)
-                else:
-                    print(f"{Fore.RED}❌ User canceled admin elevation. Exiting...{Style.RESET_ALL}")
-                    sys.exit(1)
+                cmd = f'"{exe_path}" {args}'
+                print(f"{Fore.YELLOW}⚠ Requesting admin rights via CMD (Windows Terminal not available)...{Style.RESET_ALL}")
+                ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", f'/c {cmd}', None, 1)
+            sys.exit(0)
         except Exception as e:
-            print(f"{Fore.RED}❌ Failed to elevate privileges: {e}{Style.RESET_ALL}")
-            logging.error(f"Failed to elevate privileges: {e}")
+            print(f"{Fore.RED}❌ Cannot runnin with admin: {e}{Style.RESET_ALL}")
             sys.exit(1)
     else:
-        print(f"{Fore.GREEN}✅ Running with admin privileges.{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}✅ Running with admin.{Style.RESET_ALL}")
 
 def get_latest_release():
     url = "https://api.github.com/repos/D4rkks/r.e.p.o-cheat/releases/latest"
