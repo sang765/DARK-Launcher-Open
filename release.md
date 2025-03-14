@@ -13,13 +13,14 @@
 ### 🙅 DISCLAIMER: 
 > - This is just an "automated" launcher. Any inject failure issues are due to the injector and the injector dll. Completely "unrelated" to the launcher. We only take responsibility for errors related to our launcher.
 ### 📋 File hash:
-> - MD5: **95f8309f0aa8fd768593c0361adbf4e6**
-> - SHA-1: **b965dbd6a0f7a10b9c662dc34f6a3ed012514c7c**
-> - SHA-256: **9c8c0c4532f950663e667154821332aebc72ad0279628ca07b5d2d2cbc0b2c47**
+> - MD5: **2718b6733ec9d9faa80c5d0a761e1e34**
+> - SHA-1: **9d1df31ad750e0322b1bc705fad8442ff04ee0ce**
+> - SHA-256: **718e7c97943a6c441daf265bc5c079a7a56e3a73507f5e42d423527f0f3b5ea6**
 ### ♾️ File infomation:
-> - 🆙 Last update: **<t:1741846156>**
-> - 📦 Size: **21.77 MB**
-> - ⬇️ **[Download](<https://dona.rip/f/NR6JMzO5bfE>)**
+> - 🆙 Last update: **<t:1741932268>**
+> - 📦 Size: **21.78 MB**
+> - ⬇️ **[Download](<https://dona.rip/f/eowmqisxdft>)**
+> - 🐈 [Source](<https://github.com/sang765/DARK-Launcher-Open>)
 > - 📽️ Preview: https://your.mom-is.art/f/H-tZ8Mvzzr1
 
 Install certificate here __(**NOT REQUIRED**)__: <https://easyfiles.cc/Rf_OUvApAuS>
