@@ -37,6 +37,6 @@ jobs:
         run: |
           git config user.name "GitHub Action"
           git config user.email "action@github.com"
-          git add Release.md README.md
+          git add release.md README.md
           git commit -m "Update Release.md and README.md with latest build info" || echo "No changes to commit"
           git push
