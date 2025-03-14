@@ -3,6 +3,7 @@
 # 🌑 D.A.R.K Launcher [Open-Source]
 
 An open-source launcher designed to automate downloading, updating, and injecting DLLs into the game "REPO." Supports both Steam and cracked versions.
+Also checkout: https://github.com/D4rkks/r.e.p.o-cheat
 
 ---
 
