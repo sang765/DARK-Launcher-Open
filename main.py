@@ -834,6 +834,9 @@ def handle_commands_loop(config):
 def run_launcher(config):
     setup_logging()
     set_app_user_model_id()
+    print()
+    print(f"{Fore.CYAN}📢 D.A.R.K Launcher become open source. Check out: {Fore.RESET}https://github.com/sang765/DARK-Launcher-Open")
+    print()
     print(f"{Fore.RED}Вы, должно быть, в отчаянии, раз пришли ко мне.{Style.RESET_ALL}")
     print(f"{Fore.BLUE}Launcher made by SengsDeyy{Style.RESET_ALL}")
     print(f"{Fore.YELLOW}Leave our project with a star: https://github.com/D4rkks/r.e.p.o-cheat{Style.RESET_ALL}")
@@ -862,6 +865,9 @@ def main():
                 ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
 
         if not NO_CONSOLE_MODE:
+            print()
+            print(f"{Fore.CYAN}📢 D.A.R.K Launcher become open source. Check out: {Fore.RESET}https://github.com/sang765/DARK-Launcher-Open")
+            print()
             print(f"{Fore.RED}Вы, должно быть, в отчаянии, раз пришли ко мне.{Style.RESET_ALL}")
             print(f"{Fore.BLUE}Launcher made by SengsDeyy{Style.RESET_ALL}")
             print(f"{Fore.YELLOW}Leave our project with a star: https://github.com/D4rkks/r.e.p.o-cheat{Style.RESET_ALL}")
