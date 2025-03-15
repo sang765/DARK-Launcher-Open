@@ -16,8 +16,6 @@ import glob
 import win32gui
 import win32con
 import win32api
-import py7zr
-import rarfile
 from concurrent.futures import ThreadPoolExecutor
 from tkinter import filedialog, messagebox, Tk, Label, Checkbutton, Entry, simpledialog
 import ttkbootstrap as ttk
@@ -33,77 +31,6 @@ NO_CONSOLE_MODE = "--no-console" in sys.argv
 
 DWMWA_USE_IMMERSIVE_DARK_MODE = 20
 DWMWA_MICA_EFFECT = 1029
-
-def get_window_title_from_pid(pid):
-    try:
-        def enum_windows_callback(hwnd, results):
-            window_pid = ctypes.c_ulong()
-            win32gui.GetWindowThreadProcessId(hwnd, ctypes.byref(window_pid))
-            if window_pid.value == pid and win32gui.IsWindowVisible(hwnd):
-                title = win32gui.GetWindowText(hwnd)
-                if title:
-                    results.append(title)
-
-        results = []
-        win32gui.EnumWindows(enum_windows_callback, results)
-        return results[0] if results else None
-    except Exception as e:
-        logging.error(f"Error getting window title from PID {pid}: {e}")
-        return None
-
-def get_window_title_from_exe(exe_path, timeout=30):
-    try:
-        process = subprocess.Popen(exe_path, cwd=os.path.dirname(exe_path))
-        pid = process.pid
-        start_time = time.time()
-
-        while time.time() - start_time < timeout:
-            title = get_window_title_from_pid(pid)
-            if title:
-                return title
-            time.sleep(0.5)
-        
-        process.terminate()
-        return None
-    except Exception as e:
-        logging.error(f"Error getting window title from exe {exe_path}: {e}")
-        return None
-
-def get_window_title_from_steam(steam_app_id, timeout=30):
-    try:
-        subprocess.Popen(["start", f"steam://rungameid/{steam_app_id}"], shell=True)
-        start_time = time.time()
-
-        while time.time() - start_time < timeout:
-            try:
-                for proc in psutil.process_iter(['name', 'exe', 'pid']):
-                    try:
-                        if "steam" in proc.info['name'].lower():
-                            for child in proc.children(recursive=True):
-                                child_name = child.name().lower()
-                                if "repo" in child_name or "r.e.p.o" in child_name:
-                                    title = get_window_title_from_pid(child.pid)
-                                    if title:
-                                        return title
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        continue
-            except Exception as e:
-                logging.warning(f"psutil failed in get_window_title_from_steam: {e}. Using window enumeration fallback.")
-                
-                def enum_windows_callback(hwnd, results):
-                    title = win32gui.GetWindowText(hwnd).lower()
-                    if win32gui.IsWindowVisible(hwnd) and ("repo" in title or "r.e.p.o" in title):
-                        results.append(title)
-
-                results = []
-                win32gui.EnumWindows(enum_windows_callback, results)
-                if results:
-                    return results[0]
-            time.sleep(0.5)
-        return None
-    except Exception as e:
-        logging.error(f"Error getting window title from Steam AppID {steam_app_id}: {e}")
-        return None
 
 def resource_path(relative_path):
     try:
@@ -311,109 +238,101 @@ def write_version_file(version, title, files):
             f.write(f"{filename} {size}\n")
         f.write("-------------------------\n")
 
-def extract_7z(file_path, extract_dir):
-    """Giải nén file .7z"""
-    try:
-        with py7zr.SevenZipFile(file_path, mode='r') as z:
-            z.extractall(extract_dir)
-        return True
-    except Exception as e:
-        print(f"{Fore.RED}❌ Error extracting 7z file {file_path}: {e}{Style.RESET_ALL}")
-        return False
-
-def extract_rar(file_path, extract_dir):
-    """Giải nén file .rar"""
-    try:
-        with rarfile.RarFile(file_path) as rf:
-            rf.extractall(extract_dir)
-        return True
-    except Exception as e:
-        print(f"{Fore.RED}❌ Error extracting rar file {file_path}: {e}{Style.RESET_ALL}")
-        return False
-
 def check_and_update(config):
+    latest_release = get_latest_release()
+    github_version = latest_release['tag_name']
+    github_title = latest_release['name']
+    github_assets = {asset['name']: asset for asset in latest_release['assets']}
+    
+    local_version, local_title, local_files = parse_version_file()
+    expected_files = ["smi.exe", "SharpMonoInjector.dll", "r.e.p.o.cheat.dll"]
+
     print(f"{Fore.CYAN}🔍 Checking for updates...{Style.RESET_ALL}")
     logging.info("Checking for updates")
 
-    local_version, local_title, local_files = parse_version_file()
-    expected_files = {inj["exe"]: inj["url"] for inj in config["available_injectors"]}
-    expected_files.update({
-        "SharpMonoInjector.dll": "https://api.github.com/repos/D4rkks/r.e.p.o-cheat/releases/latest",
-        "r.e.p.o.cheat.dll": "https://api.github.com/repos/D4rkks/r.e.p.o-cheat/releases/latest"
-    })
-
-    updated = False
-    temp_dir = "temp_extract"
-    os.makedirs(temp_dir, exist_ok=True)
-
-    for file_name, url in expected_files.items():
-        injector_name = next((inj["name"] for inj in config["available_injectors"] if inj["exe"] == file_name), file_name)
-        try:
-            response = requests.get(url, timeout=10)
-            if response.status_code != 200:
-                print(f"{Fore.RED}❌ HTTP error {response.status_code} checking {injector_name}: {response.text[:50]}...{Style.RESET_ALL}")
-                continue
-
-            release_info = response.json()
-            github_version = release_info.get('tag_name', 'unknown')
-            github_title = release_info.get('name', 'unknown')
-            github_assets = {asset['name']: asset for asset in release_info.get('assets', [])}
-
-            download_url = None
-            archive_file = None
-            for asset_name, asset in github_assets.items():
-                if file_name in asset_name or asset_name.endswith(('.7z', '.rar')):
-                    download_url = asset['browser_download_url']
-                    archive_file = asset_name
-                    break
-
-            if not download_url:
-                print(f"{Fore.YELLOW}⚠ No suitable asset found for {file_name} in release {url}{Style.RESET_ALL}")
-                continue
-
-            temp_archive = os.path.join(temp_dir, archive_file)
-            size = download_file(download_url, temp_archive, config)
-            if size == 0:
-                print(f"{Fore.RED}❌ Failed to download {archive_file}{Style.RESET_ALL}")
-                continue
-
-            if archive_file.endswith('.7z'):
-                if extract_7z(temp_archive, temp_dir):
-                    print(f"{Fore.GREEN}✅ Extracted {archive_file}{Style.RESET_ALL}")
-            elif archive_file.endswith('.rar'):
-                if extract_rar(temp_archive, temp_dir):
-                    print(f"{Fore.GREEN}✅ Extracted {archive_file}{Style.RESET_ALL}")
-            else:
-                print(f"{Fore.YELLOW}⚠ Unsupported archive format: {archive_file}{Style.RESET_ALL}")
-                continue
-
-            extracted_file = os.path.join(temp_dir, file_name)
-            if os.path.exists(extracted_file):
-                if os.path.exists(file_name):
-                    os.remove(file_name)
-                shutil.move(extracted_file, file_name)
-                file_size = os.path.getsize(file_name)
-                if local_files is None:
-                    local_files = {}
-                local_files[file_name] = file_size
-                updated = True
-                print(f"{Fore.GREEN}✅ Updated {file_name} to size {file_size} bytes{Style.RESET_ALL}")
-            else:
-                print(f"{Fore.YELLOW}⚠ {file_name} not found in archive {archive_file}{Style.RESET_ALL}")
-
-        except requests.RequestException as e:
-            print(f"{Fore.RED}❌ Network error checking {injector_name}: {e}{Style.RESET_ALL}")
-            logging.error(f"Network error checking {injector_name}: {e}")
-
-    shutil.rmtree(temp_dir, ignore_errors=True)
-
-    if updated and local_files:
-        write_version_file(github_version, github_title, local_files)
+    if local_version != github_version or local_title != github_title:
+        print(f"{Fore.YELLOW}🔄 Update detected: Version ({local_version} ≠ {github_version}) or Title ({local_title} ≠ {github_title}). Updating all files...{Style.RESET_ALL}")
+        logging.info(f"Update detected: local_version={local_version}, github_version={github_version}, local_title={local_title}, github_title={github_title}")
+        for filename in expected_files:
+            if os.path.exists(filename):
+                os.remove(filename)
+                print(f"{Fore.RED}🗑️ Deleted local file: {filename}{Style.RESET_ALL}")
+        
+        new_files = {}
+        for filename in expected_files:
+            if filename in github_assets:
+                download_url = github_assets[filename]['browser_download_url']
+                size = download_file(download_url, filename, config)
+                new_files[filename] = size
+                logging.info(f"Downloaded {filename}, size={size}")
+        write_version_file(github_version, github_title, new_files)
         config["last_version_check"] = time.time()
         save_config(config)
-        print(f"{Fore.GREEN}✅ Update check completed!{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}✅ Update completed to version {github_version} (Title: {github_title})!{Style.RESET_ALL}")
+        return
+
+    updated = False
+    new_files = local_files.copy()
+    
+    for filename in expected_files:
+        if filename not in github_assets:
+            if filename in local_files:
+                print(f"{Fore.YELLOW}⚠ File {filename} not found in GitHub release. Replacing...{Style.RESET_ALL}")
+                os.remove(filename)
+                logging.info(f"Deleted outdated file: {filename}")
+            continue
+        
+        github_size = github_assets[filename]['size']
+        local_size = local_files.get(filename, -1)
+        
+        if not os.path.exists(filename) or local_size != github_size:
+            print(f"{Fore.YELLOW}🔧 File {filename} size mismatch (local={local_size}, github={github_size}). Repairing...{Style.RESET_ALL}")
+            if os.path.exists(filename):
+                os.remove(filename)
+                logging.info(f"Deleted mismatched file: {filename}")
+            download_url = github_assets[filename]['browser_download_url']
+            size = download_file(download_url, filename, config)
+            new_files[filename] = size
+            updated = True
+            logging.info(f"Repaired {filename}, size={size}")
+    
+    for local_file in local_files:
+        if local_file not in expected_files:
+            print(f"{Fore.YELLOW}⚠ Unexpected file {local_file} found locally. Removing...{Style.RESET_ALL}")
+            os.remove(local_file)
+            del new_files[local_file]
+            updated = True
+            logging.info(f"Removed unexpected file: {local_file}")
+
+    if updated:
+        write_version_file(github_version, github_title, new_files)
+        config["last_version_check"] = time.time()
+        save_config(config)
+        print(f"{Fore.GREEN}✅ Repair completed!{Style.RESET_ALL}")
     else:
-        print(f"{Fore.YELLOW}⚠ No files updated. Check network or release URLs.{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}📋 Verifying file integrity for version {github_version} (Title: {github_title})...{Style.RESET_ALL}")
+        all_valid = True
+        for filename in expected_files:
+            if filename in local_files and os.path.exists(filename):
+                local_size = local_files[filename]
+                github_size = github_assets[filename]['size']
+                local_hash = compute_file_hash(filename)
+                print(f"  {filename}: Size={local_size} bytes, Hash={local_hash}")
+                if local_size != github_size:
+                    all_valid = False
+            else:
+                all_valid = False
+                print(f"{Fore.RED}❌ Missing or invalid file: {filename}{Style.RESET_ALL}")
+        
+        if all_valid:
+            print(f"{Fore.GREEN}✅ All files are up to date and verified with version {github_version} (Title: {github_title})!{Style.RESET_ALL}")
+            logging.info("All files verified and up to date")
+        else:
+            print(f"{Fore.YELLOW}⚠ Some files may be corrupted. Consider manual update.{Style.RESET_ALL}")
+            logging.warning("File integrity check failed")
+        
+        config["last_version_check"] = time.time()
+        save_config(config)
 
 def load_config():
     default_config = {
@@ -425,12 +344,7 @@ def load_config():
         "last_version_check": 0,
         "use_steam": False,
         "auto_close_after_inject": False,
-        "selected_injector": "SharpMonoInjector",
-        "available_injectors": [
-            {"name": "SharpMonoInjector", "exe": "smi.exe", "url": "https://api.github.com/repos/D4rkks/r.e.p.o-cheat/releases/latest"},
-            {"name": "ExtremeInjector", "exe": "ExtremeInjector.exe", "url": "https://api.github.com/repos/master131/ExtremeInjector/releases/latest"},
-            {"name": "Xenos", "exe": "Xenos.exe", "url": "https://api.github.com/repos/DarthTon/Xenos/releases/latest"}
-        ]
+        "notes": ""
     }
     if os.path.exists("config.json"):
         try:
@@ -458,97 +372,34 @@ def save_config(config):
         print(f"{Fore.RED}❌ Error saving config: {e}{Style.RESET_ALL}")
         logging.error(f"Error saving config: {e}")
 
-def check_injector_available(injector_exe):
-    return os.path.exists(injector_exe)
-
-def get_inject_command(injector_name, injector_exe, target_name, dll_path):
-    if injector_name == "SharpMonoInjector":
-        return f'{injector_exe} inject -p "{target_name}" -a "{dll_path}" -n r.e.p.o_cheat -c Loader -m Init'
-    elif injector_name == "ExtremeInjector":
-        return f'{injector_exe} -p "{target_name}" -i "{dll_path}"'
-    elif injector_name == "Xenos":
-        return f'{injector_exe} -p "{target_name}" -f "{dll_path}"'
-    else:
-        raise ValueError(f"Unsupported injector: {injector_name}")
-
-def is_process_running(config, window_title=None):
-    if window_title:
-        def enum_windows_callback(hwnd, results):
-            title = win32gui.GetWindowText(hwnd)
-            if window_title.lower() in title.lower() and win32gui.IsWindowVisible(hwnd):
-                results.append(hwnd)
-
-        results = []
-        win32gui.EnumWindows(enum_windows_callback, results)
-        return bool(results)
-
-    try:
-        if config.get("repo_path") and not config.get("use_steam"):
-            exe_name = os.path.basename(config["repo_path"]).lower()
-            exe_name_no_ext = os.path.splitext(exe_name)[0]
-        else:
-            exe_name_no_ext = "repo"
-        possible_names = [exe_name_no_ext, "r.e.p.o"]
-
-        for proc in psutil.process_iter(['name', 'exe']):
-            try:
-                proc_name = proc.info['name'].lower() if proc.info['name'] else ""
-                proc_exe = proc.info['exe'].lower() if proc.info['exe'] else ""
-                for name in possible_names:
-                    if name in proc_name or (proc_exe and name in os.path.basename(proc_exe)):
-                        return True
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                continue
-    except Exception as e:
-        logging.warning(f"psutil failed to list processes: {e}. Falling back to window enumeration.")
-
-        def enum_windows_callback(hwnd, results):
-            title = win32gui.GetWindowText(hwnd).lower()
-            if win32gui.IsWindowVisible(hwnd) and any(name in title for name in possible_names):
-                results.append(hwnd)
-
-        results = []
-        win32gui.EnumWindows(enum_windows_callback, results)
-        if results:
-            logging.info("Found process using window title fallback.")
-            return True
-        else:
-            logging.info("No matching process found even with window fallback.")
-            return False
-
+def is_process_running(process_name):
+    possible_names = ["repo", "r.e.p.o", "r.e.p.o."]
+    for proc in psutil.process_iter(['name']):
+        proc_name = proc.info['name'].lower()
+        for name in possible_names:
+            if name in proc_name:
+                return True
     return False
 
-def wait_for_process(config, window_title=None, timeout=30):
+def wait_for_process(process_name, timeout=30):
     start_time = time.time()
     while time.time() - start_time < timeout:
-        if is_process_running(config, window_title):
+        if is_process_running(process_name):
             return True
         time.sleep(0.5)
     return False
 
 def start_game(config):
+    steam_app_id = "3241660"
     if config["use_steam"]:
-        steam_app_id = config.get("steam_app_id", "3241660")
+        subprocess.Popen(["start", f"steam://rungameid/{steam_app_id}"], shell=True)
         logging.info(f"Starting via Steam with AppID {steam_app_id}")
-        title = get_window_title_from_steam(steam_app_id)
-        if title:
-            print(f"{Fore.GREEN}✅ Started via Steam. Window title: {title}{Style.RESET_ALL}")
-            return title
-        else:
-            print(f"{Fore.RED}❌ Failed to detect window title from Steam.{Style.RESET_ALL}")
-            return None
     else:
         if not config["repo_path"] or not os.path.exists(config["repo_path"]):
             print(f"{Fore.RED}❌ REPO.exe path is invalid or missing!{Style.RESET_ALL}")
-            return None
+            return
+        subprocess.Popen(config["repo_path"], cwd=os.path.dirname(config["repo_path"]))
         logging.info(f"Starting directly from {config['repo_path']}")
-        title = get_window_title_from_exe(config["repo_path"])
-        if title:
-            print(f"{Fore.GREEN}✅ Started from {config['repo_path']}. Window title: {title}{Style.RESET_ALL}")
-            return title
-        else:
-            print(f"{Fore.RED}❌ Failed to detect window title from {config['repo_path']}.{Style.RESET_ALL}")
-            return None
 
 def get_inject_wait_time(config):
     root = Tk()
@@ -618,29 +469,10 @@ def ensure_log_directory():
         os.makedirs(log_dir)
     return log_dir
 
-def perform_injection(config, window_title=None):
+def perform_injection(config):
     dll_name = os.path.basename(config["dll_path"])
+    repo_names = ["REPO", "R.E.P.O."]
     
-    repo_names = ["REPO", "R.E.P.O", "R.E.P.O."]
-    if window_title:
-        repo_names.insert(0, window_title)
-    if config.get("repo_path") and not config.get("use_steam"):
-        exe_name_no_ext = os.path.splitext(os.path.basename(config["repo_path"]))[0]
-        repo_names.append(exe_name_no_ext)
-
-    try:
-        for proc in psutil.process_iter(['name', 'exe', 'pid']):
-            try:
-                proc_name = proc.info['name'].lower()
-                proc_exe = proc.info['exe'].lower() if proc.info['exe'] else ""
-                if any(name.lower() in proc_name or name.lower() in os.path.basename(proc_exe) for name in repo_names):
-                    pid = proc.pid
-                    repo_names.append(str(pid))
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                continue
-    except Exception as e:
-        logging.warning(f"psutil failed in perform_injection: {e}. Relying on window titles only.")
-
     disclaimer = (
         f"{Fore.YELLOW}⚠ DISCLAIMER: This is just an \"automated\" launcher. Any inject failure issues are due to "
         f"the injector and the injector dll. Completely \"unrelated\" to the launcher. We only take responsibility "
@@ -650,49 +482,35 @@ def perform_injection(config, window_title=None):
     
     print(f"{Fore.YELLOW}💉 Injecting DLL...{Style.RESET_ALL}")
     logging.info(f"Starting injection for DLL: {dll_name}")
-
-    selected_injector = next((inj for inj in config["available_injectors"] if inj["name"] == config["selected_injector"]), None)
-    if not selected_injector or not check_injector_available(selected_injector["exe"]):
-        print(f"{Fore.RED}❌ Selected injector '{config['selected_injector']}' not found or unavailable!{Style.RESET_ALL}")
-        return False
-
-    injector_name = selected_injector["name"]
-    injector_exe = selected_injector["exe"]
-    print(f"{Fore.CYAN}🔧 Using injector: {injector_name} ({injector_exe}){Style.RESET_ALL}")
-
+    
     for repo_name in repo_names:
-        try:
-            inject_cmd = get_inject_command(injector_name, injector_exe, repo_name, dll_name)
-            logging.info(f"Trying injection with command: {inject_cmd}")
-            
-            result = subprocess.run(inject_cmd, shell=True, capture_output=True, text=True)
-            
-            if result.returncode == 0:
-                print(f"{Fore.GREEN}✅ Injection successful with {injector_name} on process/window '{repo_name}'{Style.RESET_ALL}")
-                logging.info(f"Injection successful for {dll_name} into {repo_name} with {injector_name}")
-                return True
-            else:
-                print(f"{Fore.YELLOW}⚠ Injection failed with {injector_name} on '{repo_name}': {result.stderr}{Style.RESET_ALL}")
-                logging.warning(f"Injection failed with {injector_name} on {repo_name}: {result.stderr}")
-        except Exception as e:
-            print(f"{Fore.YELLOW}⚠ Error running {injector_name} on '{repo_name}': {e}{Style.RESET_ALL}")
-            logging.warning(f"Error with {injector_name} on {repo_name}: {e}")
-
+        inject_cmd = f'smi.exe inject -p "{repo_name}" -a "{dll_name}" -n r.e.p.o_cheat -c Loader -m Init'
+        logging.info(f"Trying injection with command: {inject_cmd}")
+        
+        result = subprocess.run(inject_cmd, shell=True, capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            print(f"{Fore.GREEN}✅ Injection successful with process '{repo_name}'{Style.RESET_ALL}")
+            logging.info(f"Injection successful for {dll_name} into {repo_name}")
+            return True
+        else:
+            print(f"{Fore.YELLOW}⚠ Injection failed with process '{repo_name}'. Trying next name...{Style.RESET_ALL}")
+            logging.warning(f"Injection failed with {repo_name}: {result.stderr}")
+    
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     log_dir = ensure_log_directory()
     log_file = os.path.join(log_dir, f"inject_fail_{timestamp}.log")
     
     with open(log_file, "w") as f:
-        f.write(f"Injector: {injector_name}\n")
         f.write(f"Inject Command Attempts:\n")
         for repo_name in repo_names:
-            cmd = get_inject_command(injector_name, injector_exe, repo_name, dll_name)
+            cmd = f'smi.exe inject -p "{repo_name}" -a "{dll_name}" -n r.e.p.o_cheat -c Loader -m Init'
             f.write(f"{cmd}\n")
         f.write(f"Timestamp: {time.ctime()}\n")
         f.write(f"Error Output:\n{result.stderr}\n")
         f.write(f"Standard Output:\n{result.stdout}\n")
     
-    print(f"{Fore.RED}❌ Injection failed with {injector_name}! Error log saved to {log_file}{Style.RESET_ALL}")
+    print(f"{Fore.RED}❌ Injection failed with all process names! Error log saved to {log_file}{Style.RESET_ALL}")
     show_inject_failure(result.stderr, config, log_file)
     return False
 
@@ -1003,13 +821,6 @@ def config_gui(config, standalone=False):
     auto_close_var = ttk.BooleanVar(value=config["auto_close_after_inject"])
     Checkbutton(root, text="Auto Close After Inject", variable=auto_close_var).grid(row=4, column=0, columnspan=2, pady=5)
 
-    # Thêm Combobox chọn injector
-    Label(root, text="Injector:").grid(row=5, column=0, padx=5, pady=5)
-    injector_options = [inj["name"] for inj in config["available_injectors"]]
-    injector_var = ttk.StringVar(value=config["selected_injector"])
-    injector_combobox = ttk.Combobox(root, textvariable=injector_var, values=injector_options, state="readonly")
-    injector_combobox.grid(row=5, column=1, padx=5, pady=5, sticky="w")
-
     def save_config_and_close():
         new_repo_path = repo_entry.get() if not config["use_steam"] else ""
         new_dll_path = dll_entry.get()
@@ -1024,14 +835,13 @@ def config_gui(config, standalone=False):
         config["auto_inject"] = auto_inject_var.get()
         config["inject_wait_time"] = int(wait_time_entry.get()) if wait_time_entry.get().isdigit() else 10
         config["auto_close_after_inject"] = auto_close_var.get()
-        config["selected_injector"] = injector_var.get()
         save_config(config)
         root.destroy()
 
     if standalone:
-        ttk.Button(root, text="Save", command=save_config_and_close, style="Accent.TButton").grid(row=6, column=0, columnspan=4, pady=10)
+        ttk.Button(root, text="Save", command=save_config_and_close, style="Accent.TButton").grid(row=5, column=0, columnspan=4, pady=10)
     else:
-        ttk.Button(root, text="Save & Start", command=save_config_and_close, style="Accent.TButton").grid(row=6, column=0, columnspan=4, pady=10)
+        ttk.Button(root, text="Save & Start", command=save_config_and_close, style="Accent.TButton").grid(row=5, column=0, columnspan=4, pady=10)
 
     root.protocol("WM_DELETE_WINDOW", lambda: root.destroy() if standalone else sys.exit(1))
     root.mainloop()
@@ -1133,20 +943,21 @@ def main():
             else:
                 break
 
-        game_already_running = is_process_running(config)
-        window_title = None
+        repo_name = "REPO"
+        game_already_running = is_process_running(repo_name)
+
         if not game_already_running:
             if not NO_CONSOLE_MODE:
                 print(f"{Fore.YELLOW}🚀 Game not running. Starting REPO.exe...{Style.RESET_ALL}")
-            window_title = start_game(config)
-            if wait_for_process(config, window_title=window_title):
+            start_game(config)
+            if wait_for_process(repo_name):
                 if not NO_CONSOLE_MODE:
-                    print(f"{Fore.GREEN}✅ Game detected with window title: {window_title or 'unknown'}{Style.RESET_ALL}")
+                    print(f"{Fore.GREEN}✅ REPO detected.{Style.RESET_ALL}")
                 if config["auto_inject"]:
                     if not NO_CONSOLE_MODE:
-                        print(f"{Fore.GREEN}✅ Game started, waiting {config['inject_wait_time']} seconds before injection...{Style.RESET_ALL}")
+                        print(f"{Fore.GREEN}✅ REPO started, waiting {config['inject_wait_time']} seconds before injection...{Style.RESET_ALL}")
                     time.sleep(config["inject_wait_time"])
-                    if perform_injection(config, window_title):
+                    if perform_injection(config):
                         if not NO_CONSOLE_MODE:
                             show_inject_success(config)
                             print(f"{Fore.GREEN}🎉 DLL has been successfully injected via auto_inject!{Style.RESET_ALL}")
@@ -1160,38 +971,14 @@ def main():
                             print(f"{Fore.RED}❌ Auto injection failed. Disabled auto_inject.{Style.RESET_ALL}")
             else:
                 if not NO_CONSOLE_MODE:
-                    print(f"{Fore.RED}❌ Game did not start within timeout.{Style.RESET_ALL}")
+                    print(f"{Fore.RED}❌ REPO.exe did not start within timeout.{Style.RESET_ALL}")
         else:
-            try:
-                for proc in psutil.process_iter(['pid', 'exe']):
-                    try:
-                        if config.get("repo_path") and proc.info['exe'] and os.path.basename(proc.info['exe']).lower() == os.path.basename(config["repo_path"]).lower():
-                            window_title = get_window_title_from_pid(proc.pid)
-                            break
-                        elif config["use_steam"] and "repo" in proc.info['name'].lower():
-                            window_title = get_window_title_from_pid(proc.pid)
-                            break
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        continue
-            except Exception as e:
-                logging.warning(f"psutil failed to find running process: {e}. Using window enumeration.")
-                def enum_windows_callback(hwnd, results):
-                    title = win32gui.GetWindowText(hwnd).lower()
-                    if win32gui.IsWindowVisible(hwnd) and ("repo" in title or "r.e.p.o" in title):
-                        results.append(title)
-                results = []
-                win32gui.EnumWindows(enum_windows_callback, results)
-                window_title = results[0] if results else None
-
             if not NO_CONSOLE_MODE:
-                if window_title:
-                    print(f"{Fore.GREEN}✅ Game is already running with window title: {window_title}{Style.RESET_ALL}")
-                else:
-                    print(f"{Fore.YELLOW}⚠ Game is running but window title not detected. Possible antivirus interference.{Style.RESET_ALL}")
+                print(f"{Fore.GREEN}✅ REPO or R.E.P.O. is already running.{Style.RESET_ALL}")
             if config["auto_inject"]:
                 if not NO_CONSOLE_MODE:
                     print(f"{Fore.GREEN}✅ Game already running, injecting immediately...{Style.RESET_ALL}")
-                if perform_injection(config, window_title):
+                if perform_injection(config):
                     if not NO_CONSOLE_MODE:
                         show_inject_success(config)
                         print(f"{Fore.GREEN}🎉 DLL has been successfully injected via auto_inject!{Style.RESET_ALL}")
