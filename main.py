@@ -32,6 +32,77 @@ NO_CONSOLE_MODE = "--no-console" in sys.argv
 DWMWA_USE_IMMERSIVE_DARK_MODE = 20
 DWMWA_MICA_EFFECT = 1029
 
+def get_window_title_from_pid(pid):
+    try:
+        def enum_windows_callback(hwnd, results):
+            window_pid = ctypes.c_ulong()
+            win32gui.GetWindowThreadProcessId(hwnd, ctypes.byref(window_pid))
+            if window_pid.value == pid and win32gui.IsWindowVisible(hwnd):
+                title = win32gui.GetWindowText(hwnd)
+                if title:
+                    results.append(title)
+
+        results = []
+        win32gui.EnumWindows(enum_windows_callback, results)
+        return results[0] if results else None
+    except Exception as e:
+        logging.error(f"Error getting window title from PID {pid}: {e}")
+        return None
+
+def get_window_title_from_exe(exe_path, timeout=30):
+    try:
+        process = subprocess.Popen(exe_path, cwd=os.path.dirname(exe_path))
+        pid = process.pid
+        start_time = time.time()
+
+        while time.time() - start_time < timeout:
+            title = get_window_title_from_pid(pid)
+            if title:
+                return title
+            time.sleep(0.5)
+        
+        process.terminate()
+        return None
+    except Exception as e:
+        logging.error(f"Error getting window title from exe {exe_path}: {e}")
+        return None
+
+def get_window_title_from_steam(steam_app_id, timeout=30):
+    try:
+        subprocess.Popen(["start", f"steam://rungameid/{steam_app_id}"], shell=True)
+        start_time = time.time()
+
+        while time.time() - start_time < timeout:
+            try:
+                for proc in psutil.process_iter(['name', 'exe', 'pid']):
+                    try:
+                        if "steam" in proc.info['name'].lower():
+                            for child in proc.children(recursive=True):
+                                child_name = child.name().lower()
+                                if "repo" in child_name or "r.e.p.o" in child_name:
+                                    title = get_window_title_from_pid(child.pid)
+                                    if title:
+                                        return title
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
+            except Exception as e:
+                logging.warning(f"psutil failed in get_window_title_from_steam: {e}. Using window enumeration fallback.")
+                
+                def enum_windows_callback(hwnd, results):
+                    title = win32gui.GetWindowText(hwnd).lower()
+                    if win32gui.IsWindowVisible(hwnd) and ("repo" in title or "r.e.p.o" in title):
+                        results.append(title)
+
+                results = []
+                win32gui.EnumWindows(enum_windows_callback, results)
+                if results:
+                    return results[0]
+            time.sleep(0.5)
+        return None
+    except Exception as e:
+        logging.error(f"Error getting window title from Steam AppID {steam_app_id}: {e}")
+        return None
+
 def resource_path(relative_path):
     try:
         base_path = sys._MEIPASS
@@ -372,34 +443,84 @@ def save_config(config):
         print(f"{Fore.RED}❌ Error saving config: {e}{Style.RESET_ALL}")
         logging.error(f"Error saving config: {e}")
 
-def is_process_running(process_name):
-    possible_names = ["repo", "r.e.p.o", "r.e.p.o."]
-    for proc in psutil.process_iter(['name']):
-        proc_name = proc.info['name'].lower()
-        for name in possible_names:
-            if name in proc_name:
-                return True
+def is_process_running(config, window_title=None):
+    if window_title:
+        def enum_windows_callback(hwnd, results):
+            title = win32gui.GetWindowText(hwnd)
+            if window_title.lower() in title.lower() and win32gui.IsWindowVisible(hwnd):
+                results.append(hwnd)
+
+        results = []
+        win32gui.EnumWindows(enum_windows_callback, results)
+        return bool(results)
+
+    try:
+        if config.get("repo_path") and not config.get("use_steam"):
+            exe_name = os.path.basename(config["repo_path"]).lower()
+            exe_name_no_ext = os.path.splitext(exe_name)[0]
+        else:
+            exe_name_no_ext = "repo"
+        possible_names = [exe_name_no_ext, "r.e.p.o"]
+
+        for proc in psutil.process_iter(['name', 'exe']):
+            try:
+                proc_name = proc.info['name'].lower() if proc.info['name'] else ""
+                proc_exe = proc.info['exe'].lower() if proc.info['exe'] else ""
+                for name in possible_names:
+                    if name in proc_name or (proc_exe and name in os.path.basename(proc_exe)):
+                        return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+    except Exception as e:
+        logging.warning(f"psutil failed to list processes: {e}. Falling back to window enumeration.")
+
+        def enum_windows_callback(hwnd, results):
+            title = win32gui.GetWindowText(hwnd).lower()
+            if win32gui.IsWindowVisible(hwnd) and any(name in title for name in possible_names):
+                results.append(hwnd)
+
+        results = []
+        win32gui.EnumWindows(enum_windows_callback, results)
+        if results:
+            logging.info("Found process using window title fallback.")
+            return True
+        else:
+            logging.info("No matching process found even with window fallback.")
+            return False
+
     return False
 
-def wait_for_process(process_name, timeout=30):
+def wait_for_process(config, window_title=None, timeout=30):
     start_time = time.time()
     while time.time() - start_time < timeout:
-        if is_process_running(process_name):
+        if is_process_running(config, window_title):
             return True
         time.sleep(0.5)
     return False
 
 def start_game(config):
-    steam_app_id = "3241660"
     if config["use_steam"]:
-        subprocess.Popen(["start", f"steam://rungameid/{steam_app_id}"], shell=True)
+        steam_app_id = config.get("steam_app_id", "3241660")
         logging.info(f"Starting via Steam with AppID {steam_app_id}")
+        title = get_window_title_from_steam(steam_app_id)
+        if title:
+            print(f"{Fore.GREEN}✅ Started via Steam. Window title: {title}{Style.RESET_ALL}")
+            return title
+        else:
+            print(f"{Fore.RED}❌ Failed to detect window title from Steam.{Style.RESET_ALL}")
+            return None
     else:
         if not config["repo_path"] or not os.path.exists(config["repo_path"]):
             print(f"{Fore.RED}❌ REPO.exe path is invalid or missing!{Style.RESET_ALL}")
-            return
-        subprocess.Popen(config["repo_path"], cwd=os.path.dirname(config["repo_path"]))
+            return None
         logging.info(f"Starting directly from {config['repo_path']}")
+        title = get_window_title_from_exe(config["repo_path"])
+        if title:
+            print(f"{Fore.GREEN}✅ Started from {config['repo_path']}. Window title: {title}{Style.RESET_ALL}")
+            return title
+        else:
+            print(f"{Fore.RED}❌ Failed to detect window title from {config['repo_path']}.{Style.RESET_ALL}")
+            return None
 
 def get_inject_wait_time(config):
     root = Tk()
@@ -469,10 +590,29 @@ def ensure_log_directory():
         os.makedirs(log_dir)
     return log_dir
 
-def perform_injection(config):
+def perform_injection(config, window_title=None):
     dll_name = os.path.basename(config["dll_path"])
-    repo_names = ["REPO", "R.E.P.O."]
     
+    repo_names = ["REPO", "R.E.P.O", "R.E.P.O."]
+    if window_title:
+        repo_names.insert(0, window_title)
+    if config.get("repo_path") and not config.get("use_steam"):
+        exe_name_no_ext = os.path.splitext(os.path.basename(config["repo_path"]))[0]
+        repo_names.append(exe_name_no_ext)
+
+    try:
+        for proc in psutil.process_iter(['name', 'exe', 'pid']):
+            try:
+                proc_name = proc.info['name'].lower()
+                proc_exe = proc.info['exe'].lower() if proc.info['exe'] else ""
+                if any(name.lower() in proc_name or name.lower() in os.path.basename(proc_exe) for name in repo_names):
+                    pid = proc.pid
+                    repo_names.append(str(pid))
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+    except Exception as e:
+        logging.warning(f"psutil failed in perform_injection: {e}. Relying on window titles only.")
+
     disclaimer = (
         f"{Fore.YELLOW}⚠ DISCLAIMER: This is just an \"automated\" launcher. Any inject failure issues are due to "
         f"the injector and the injector dll. Completely \"unrelated\" to the launcher. We only take responsibility "
@@ -490,11 +630,11 @@ def perform_injection(config):
         result = subprocess.run(inject_cmd, shell=True, capture_output=True, text=True)
         
         if result.returncode == 0:
-            print(f"{Fore.GREEN}✅ Injection successful with process '{repo_name}'{Style.RESET_ALL}")
+            print(f"{Fore.GREEN}✅ Injection successful with process/window '{repo_name}'{Style.RESET_ALL}")
             logging.info(f"Injection successful for {dll_name} into {repo_name}")
             return True
         else:
-            print(f"{Fore.YELLOW}⚠ Injection failed with process '{repo_name}'. Trying next name...{Style.RESET_ALL}")
+            print(f"{Fore.YELLOW}⚠ Injection failed with process/window '{repo_name}'. Trying next name...{Style.RESET_ALL}")
             logging.warning(f"Injection failed with {repo_name}: {result.stderr}")
     
     timestamp = time.strftime("%Y%m%d_%H%M%S")
@@ -943,21 +1083,20 @@ def main():
             else:
                 break
 
-        repo_name = "REPO"
-        game_already_running = is_process_running(repo_name)
-
+        game_already_running = is_process_running(config)
+        window_title = None
         if not game_already_running:
             if not NO_CONSOLE_MODE:
                 print(f"{Fore.YELLOW}🚀 Game not running. Starting REPO.exe...{Style.RESET_ALL}")
-            start_game(config)
-            if wait_for_process(repo_name):
+            window_title = start_game(config)
+            if wait_for_process(config, window_title=window_title):
                 if not NO_CONSOLE_MODE:
-                    print(f"{Fore.GREEN}✅ REPO detected.{Style.RESET_ALL}")
+                    print(f"{Fore.GREEN}✅ Game detected with window title: {window_title or 'unknown'}{Style.RESET_ALL}")
                 if config["auto_inject"]:
                     if not NO_CONSOLE_MODE:
-                        print(f"{Fore.GREEN}✅ REPO started, waiting {config['inject_wait_time']} seconds before injection...{Style.RESET_ALL}")
+                        print(f"{Fore.GREEN}✅ Game started, waiting {config['inject_wait_time']} seconds before injection...{Style.RESET_ALL}")
                     time.sleep(config["inject_wait_time"])
-                    if perform_injection(config):
+                    if perform_injection(config, window_title):
                         if not NO_CONSOLE_MODE:
                             show_inject_success(config)
                             print(f"{Fore.GREEN}🎉 DLL has been successfully injected via auto_inject!{Style.RESET_ALL}")
@@ -971,14 +1110,38 @@ def main():
                             print(f"{Fore.RED}❌ Auto injection failed. Disabled auto_inject.{Style.RESET_ALL}")
             else:
                 if not NO_CONSOLE_MODE:
-                    print(f"{Fore.RED}❌ REPO.exe did not start within timeout.{Style.RESET_ALL}")
+                    print(f"{Fore.RED}❌ Game did not start within timeout.{Style.RESET_ALL}")
         else:
+            try:
+                for proc in psutil.process_iter(['pid', 'exe']):
+                    try:
+                        if config.get("repo_path") and proc.info['exe'] and os.path.basename(proc.info['exe']).lower() == os.path.basename(config["repo_path"]).lower():
+                            window_title = get_window_title_from_pid(proc.pid)
+                            break
+                        elif config["use_steam"] and "repo" in proc.info['name'].lower():
+                            window_title = get_window_title_from_pid(proc.pid)
+                            break
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
+            except Exception as e:
+                logging.warning(f"psutil failed to find running process: {e}. Using window enumeration.")
+                def enum_windows_callback(hwnd, results):
+                    title = win32gui.GetWindowText(hwnd).lower()
+                    if win32gui.IsWindowVisible(hwnd) and ("repo" in title or "r.e.p.o" in title):
+                        results.append(title)
+                results = []
+                win32gui.EnumWindows(enum_windows_callback, results)
+                window_title = results[0] if results else None
+
             if not NO_CONSOLE_MODE:
-                print(f"{Fore.GREEN}✅ REPO or R.E.P.O. is already running.{Style.RESET_ALL}")
+                if window_title:
+                    print(f"{Fore.GREEN}✅ Game is already running with window title: {window_title}{Style.RESET_ALL}")
+                else:
+                    print(f"{Fore.YELLOW}⚠ Game is running but window title not detected. Possible antivirus interference.{Style.RESET_ALL}")
             if config["auto_inject"]:
                 if not NO_CONSOLE_MODE:
                     print(f"{Fore.GREEN}✅ Game already running, injecting immediately...{Style.RESET_ALL}")
-                if perform_injection(config):
+                if perform_injection(config, window_title):
                     if not NO_CONSOLE_MODE:
                         show_inject_success(config)
                         print(f"{Fore.GREEN}🎉 DLL has been successfully injected via auto_inject!{Style.RESET_ALL}")
