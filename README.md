@@ -41,6 +41,7 @@ Also checkout: https://github.com/D4rkks/r.e.p.o-cheat
 - `inject_wait_time`: Open GUI to set injection delay.
 - `status`: Show current configuration and game status.
 - `download_dll <url>`: Download a DLL from a specified URL.
+- `config`: Open config GUI
 - `help`: Display this list.
 
 ---
