@@ -130,10 +130,23 @@ def run_as_admin():
     else:
         print(f"{Fore.GREEN}✅ Running with admin.{Style.RESET_ALL}")
 
-def get_latest_release():
-    url = "https://api.github.com/repos/D4rkks/r.e.p.o-cheat/releases/latest"
-    response = requests.get(url)
-    return response.json()
+def get_latest_release(config):
+    channels = {
+        "Stable": "https://api.github.com/repos/D4rkks/r.e.p.o-cheat/releases/latest",
+        "Beta": "https://api.github.com/repos/peeberpoober/beta-r.e.p.o-cheat/releases/latest"
+    }
+    url = channels.get(config["channel"], channels["Stable"])
+    try:
+        response = requests.get(url)
+        if response.status_code != 200:
+            print(f"{Fore.RED}❌ Failed to fetch latest release from {url}: {response.status_code}{Style.RESET_ALL}")
+            logging.error(f"Failed to fetch release from {url}: {response.status_code}")
+            return None
+        return response.json()
+    except requests.RequestException as e:
+        print(f"{Fore.RED}❌ Network error fetching release from {url}: {e}{Style.RESET_ALL}")
+        logging.error(f"Network error fetching release from {url}: {e}")
+        return None
 
 def format_size(size):
     for unit in ['B', 'KB', 'MB', 'GB']:
@@ -239,7 +252,10 @@ def write_version_file(version, title, files):
         f.write("-------------------------\n")
 
 def check_and_update(config):
-    latest_release = get_latest_release()
+    latest_release = get_latest_release(config)
+    if not latest_release:
+        print(f"{Fore.RED}❌ Could not check for updates. Skipping...{Style.RESET_ALL}")
+        return
     github_version = latest_release['tag_name']
     github_title = latest_release['name']
     github_assets = {asset['name']: asset for asset in latest_release['assets']}
@@ -344,7 +360,7 @@ def load_config():
         "last_version_check": 0,
         "use_steam": False,
         "auto_close_after_inject": False,
-        "notes": ""
+        "channel": "Stable"
     }
     if os.path.exists("config.json"):
         try:
@@ -672,6 +688,7 @@ def handle_commands(command, config):
             print(f"  Game Running: {is_process_running('REPO')}")
             print(f"  Auto Inject Failed: {config.get('auto_inject_failed', False)}")
             print(f"  Auto Close After Inject: {config['auto_close_after_inject']}")
+            print(f"  Channel: {config['channel']}")  # Thêm thông tin channel
             print(f"  Last Version Check: {int(time.time() - config['last_version_check'])}s ago")
 
         elif action in ("download_dll", "-ddl"):
@@ -753,7 +770,7 @@ def apply_theme(root, wallpaper_path=None, initial=False):
 def select_file(title, filetypes):
     return filedialog.askopenfilename(title=title, filetypes=filetypes)
 
-def config_gui(config, standalone=False):
+def config_gui(config, standalone=False, first_launch=False):
     root = Tk()
     root.title("Setup Config GUI")
     root.resizable(False, False)
@@ -820,28 +837,34 @@ def config_gui(config, standalone=False):
 
     auto_close_var = ttk.BooleanVar(value=config["auto_close_after_inject"])
     Checkbutton(root, text="Auto Close After Inject", variable=auto_close_var).grid(row=4, column=0, columnspan=2, pady=5)
+    
+    Label(root, text="Release Channel:").grid(row=5, column=0, padx=5, pady=5)
+    channel_var = ttk.StringVar(value=config.get("channel", "Stable"))
+    channel_combo = ttk.Combobox(root, textvariable=channel_var, values=["Stable", "Beta"], state="readonly", width=10)
+    channel_combo.grid(row=5, column=1, padx=5, pady=5, sticky="w")
 
     def save_config_and_close():
         new_repo_path = repo_entry.get() if not config["use_steam"] else ""
         new_dll_path = dll_entry.get()
-        if not new_dll_path or not os.path.exists(new_dll_path) or not is_valid_dll(new_dll_path):
+        if not first_launch and (not new_dll_path or not os.path.exists(new_dll_path) or not is_valid_dll(new_dll_path)):
             messagebox.showerror("Error", "Invalid or missing DLL path!")
             return
         if not config["use_steam"] and (not new_repo_path or not os.path.exists(new_repo_path)):
             messagebox.showerror("Error", "Invalid or missing REPO path!")
             return
         config["repo_path"] = new_repo_path
-        config["dll_path"] = new_dll_path
+        config["dll_path"] = new_dll_path if not first_launch else ""  # Để trống trong lần đầu
         config["auto_inject"] = auto_inject_var.get()
         config["inject_wait_time"] = int(wait_time_entry.get()) if wait_time_entry.get().isdigit() else 10
         config["auto_close_after_inject"] = auto_close_var.get()
+        config["channel"] = channel_var.get()
         save_config(config)
         root.destroy()
 
     if standalone:
-        ttk.Button(root, text="Save", command=save_config_and_close, style="Accent.TButton").grid(row=5, column=0, columnspan=4, pady=10)
+        ttk.Button(root, text="Save", command=save_config_and_close, style="Accent.TButton").grid(row=6, column=0, columnspan=4, pady=10)
     else:
-        ttk.Button(root, text="Save & Start", command=save_config_and_close, style="Accent.TButton").grid(row=5, column=0, columnspan=4, pady=10)
+        ttk.Button(root, text="Save & Start", command=save_config_and_close, style="Accent.TButton").grid(row=6, column=0, columnspan=4, pady=10)
 
     root.protocol("WM_DELETE_WINDOW", lambda: root.destroy() if standalone else sys.exit(1))
     root.mainloop()
@@ -899,9 +922,11 @@ def main():
             print()
             print(f"{Fore.CYAN}📢 D.A.R.K Launcher become open source. Check out: {Fore.RESET}https://github.com/sang765/DARK-Launcher-Open")
             print()
+            print(f"{Fore.YELLOW}Stable Channel: https://github.com/D4rkks/r.e.p.o-cheat{Style.RESET_ALL}")
+            print(f"{Fore.YELLOW}Beta Channel: https://github.com/peeberpoober/beta-r.e.p.o-cheat{Style.RESET_ALL}")
+            print()
             print(f"{Fore.RED}Вы, должно быть, в отчаянии, раз пришли ко мне.{Style.RESET_ALL}")
             print(f"{Fore.BLUE}Launcher made by SengsDeyy{Style.RESET_ALL}")
-            print(f"{Fore.YELLOW}Leave our project with a star: https://github.com/D4rkks/r.e.p.o-cheat{Style.RESET_ALL}")
         logging.info("Launcher started")
 
         if NO_INJECT_MODE:
@@ -914,22 +939,37 @@ def main():
             run_as_admin()
             return
 
+        first_launch = not os.path.exists("config.json")
+        if first_launch:
+            if not NO_CONSOLE_MODE:
+                print(f"{Fore.YELLOW}⚠ First launch detected. Opening configuration GUI to select channel...{Style.RESET_ALL}")
+            config = config_gui(config, first_launch=True)
+            save_config(config)
+            if not NO_CONSOLE_MODE:
+                print(f"{Fore.GREEN}✅ Configuration saved. Checking for updates based on selected channel...{Style.RESET_ALL}")
+        else:
+            config = load_config()
+
         check_and_update(config)
         ensure_log_directory()
 
-        if not os.path.exists("config.json"):
-            if not NO_CONSOLE_MODE:
-                print(f"{Fore.YELLOW}⚠ No config file found. Opening configuration GUI...{Style.RESET_ALL}")
-            config = config_gui(config)
-        else:
-            config = load_config()
+        if first_launch and (not config["dll_path"] or not os.path.exists(config["dll_path"])):
+            default_dll = os.path.abspath("r.e.p.o.cheat.dll")
+            if os.path.exists(default_dll) and is_valid_dll(default_dll):
+                config["dll_path"] = default_dll
+                save_config(config)
+                if not NO_CONSOLE_MODE:
+                    print(f"{Fore.GREEN}✅ DLL 'r.e.p.o.cheat.dll' automatically selected and saved to config.{Style.RESET_ALL}")
+            else:
+                if not NO_CONSOLE_MODE:
+                    print(f"{Fore.RED}❌ DLL 'r.e.p.o.cheat.dll' not found after update. Please configure manually.{Style.RESET_ALL}")
 
         while True:
             if not config["dll_path"] or not os.path.exists(config["dll_path"]) or \
                (not config["use_steam"] and (not config["repo_path"] or not os.path.exists(config["repo_path"]))):
                 if not NO_CONSOLE_MODE:
                     print(f"{Fore.YELLOW}⚠ Configuration is incomplete or invalid. Please configure again.{Style.RESET_ALL}")
-                config = config_gui(config)
+                config = config_gui(config, first_launch=False)
                 if not config["dll_path"] or (not config["use_steam"] and not config["repo_path"]):
                     response = messagebox.askyesno("Configuration Required", "DLL path or Game path (if not using Steam) is still missing. Retry configuration?")
                     if not response:
