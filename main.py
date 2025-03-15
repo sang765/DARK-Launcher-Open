@@ -310,100 +310,63 @@ def write_version_file(version, title, files):
         f.write("-------------------------\n")
 
 def check_and_update(config):
-    latest_release = get_latest_release()
-    github_version = latest_release['tag_name']
-    github_title = latest_release['name']
-    github_assets = {asset['name']: asset for asset in latest_release['assets']}
-    
-    local_version, local_title, local_files = parse_version_file()
-    expected_files = ["smi.exe", "SharpMonoInjector.dll", "r.e.p.o.cheat.dll"]
-
     print(f"{Fore.CYAN}🔍 Checking for updates...{Style.RESET_ALL}")
     logging.info("Checking for updates")
 
-    if local_version != github_version or local_title != github_title:
-        print(f"{Fore.YELLOW}🔄 Update detected: Version ({local_version} ≠ {github_version}) or Title ({local_title} ≠ {github_title}). Updating all files...{Style.RESET_ALL}")
-        logging.info(f"Update detected: local_version={local_version}, github_version={github_version}, local_title={local_title}, github_title={github_title}")
-        for filename in expected_files:
-            if os.path.exists(filename):
-                os.remove(filename)
-                print(f"{Fore.RED}🗑️ Deleted local file: {filename}{Style.RESET_ALL}")
-        
-        new_files = {}
-        for filename in expected_files:
-            if filename in github_assets:
-                download_url = github_assets[filename]['browser_download_url']
-                size = download_file(download_url, filename, config)
-                new_files[filename] = size
-                logging.info(f"Downloaded {filename}, size={size}")
-        write_version_file(github_version, github_title, new_files)
-        config["last_version_check"] = time.time()
-        save_config(config)
-        print(f"{Fore.GREEN}✅ Update completed to version {github_version} (Title: {github_title})!{Style.RESET_ALL}")
-        return
+    local_version, local_title, local_files = parse_version_file()
+    expected_files = {inj["exe"]: inj["url"] for inj in config["available_injectors"]}
+    expected_files.update({
+        "SharpMonoInjector.dll": "https://api.github.com/repos/D4rkks/r.e.p.o-cheat/releases/latest",
+        "r.e.p.o.cheat.dll": "https://api.github.com/repos/D4rkks/r.e.p.o-cheat/releases/latest"
+    })
 
-    updated = False
-    new_files = local_files.copy()
-    
-    for filename in expected_files:
-        if filename not in github_assets:
-            if filename in local_files:
-                print(f"{Fore.YELLOW}⚠ File {filename} not found in GitHub release. Replacing...{Style.RESET_ALL}")
-                os.remove(filename)
-                logging.info(f"Deleted outdated file: {filename}")
-            continue
-        
-        github_size = github_assets[filename]['size']
-        local_size = local_files.get(filename, -1)
-        
-        if not os.path.exists(filename) or local_size != github_size:
-            print(f"{Fore.YELLOW}🔧 File {filename} size mismatch (local={local_size}, github={github_size}). Repairing...{Style.RESET_ALL}")
-            if os.path.exists(filename):
-                os.remove(filename)
-                logging.info(f"Deleted mismatched file: {filename}")
-            download_url = github_assets[filename]['browser_download_url']
-            size = download_file(download_url, filename, config)
-            new_files[filename] = size
-            updated = True
-            logging.info(f"Repaired {filename}, size={size}")
-    
-    for local_file in local_files:
-        if local_file not in expected_files:
-            print(f"{Fore.YELLOW}⚠ Unexpected file {local_file} found locally. Removing...{Style.RESET_ALL}")
-            os.remove(local_file)
-            del new_files[local_file]
-            updated = True
-            logging.info(f"Removed unexpected file: {local_file}")
+    for injector in config["available_injectors"]:
+        injector_exe = injector["exe"]
+        injector_url = injector["url"]
+        injector_name = injector["name"]
 
-    if updated:
-        write_version_file(github_version, github_title, new_files)
-        config["last_version_check"] = time.time()
-        save_config(config)
-        print(f"{Fore.GREEN}✅ Repair completed!{Style.RESET_ALL}")
-    else:
-        print(f"{Fore.CYAN}📋 Verifying file integrity for version {github_version} (Title: {github_title})...{Style.RESET_ALL}")
-        all_valid = True
-        for filename in expected_files:
-            if filename in local_files and os.path.exists(filename):
-                local_size = local_files[filename]
-                github_size = github_assets[filename]['size']
-                local_hash = compute_file_hash(filename)
-                print(f"  {filename}: Size={local_size} bytes, Hash={local_hash}")
-                if local_size != github_size:
-                    all_valid = False
+        try:
+            response = requests.get(injector_url)
+            release_info = response.json()
+            github_version = release_info['tag_name']
+            github_title = release_info['name']
+            github_assets = {asset['name']: asset for asset in release_info['assets']}
+
+            if injector_exe not in github_assets:
+                print(f"{Fore.YELLOW}⚠ {injector_exe} not found in release {injector_url}. Skipping update.{Style.RESET_ALL}")
+                continue
+
+            github_size = github_assets[injector_exe]['size']
+            local_size = local_files.get(injector_exe, -1) if local_files else -1
+
+            if not os.path.exists(injector_exe) or local_size != github_size or local_version != github_version:
+                print(f"{Fore.YELLOW}🔄 Updating {injector_exe}: Version ({local_version} ≠ {github_version}) or size mismatch (local={local_size}, github={github_size}){Style.RESET_ALL}")
+                if os.path.exists(injector_exe):
+                    os.remove(injector_exe)
+                    print(f"{Fore.RED}🗑️ Deleted old {injector_exe}{Style.RESET_ALL}")
+                download_url = github_assets[injector_exe]['browser_download_url']
+                size = download_file(download_url, injector_exe, config)
+                if size > 0:
+                    if local_files is None:
+                        local_files = {}
+                    local_files[injector_exe] = size
+                    print(f"{Fore.GREEN}✅ Updated {injector_exe} to size {size} bytes{Style.RESET_ALL}")
+                else:
+                    print(f"{Fore.RED}❌ Failed to download {injector_exe}{Style.RESET_ALL}")
             else:
-                all_valid = False
-                print(f"{Fore.RED}❌ Missing or invalid file: {filename}{Style.RESET_ALL}")
-        
-        if all_valid:
-            print(f"{Fore.GREEN}✅ All files are up to date and verified with version {github_version} (Title: {github_title})!{Style.RESET_ALL}")
-            logging.info("All files verified and up to date")
-        else:
-            print(f"{Fore.YELLOW}⚠ Some files may be corrupted. Consider manual update.{Style.RESET_ALL}")
-            logging.warning("File integrity check failed")
-        
+                print(f"{Fore.GREEN}✅ {injector_exe} is up to date (version {github_version}){Style.RESET_ALL}")
+
+        except requests.RequestException as e:
+            print(f"{Fore.RED}❌ Network error checking {injector_name}: {e}{Style.RESET_ALL}")
+            logging.error(f"Network error checking {injector_name}: {e}")
+
+    if local_files:
+        write_version_file(github_version, github_title, local_files)
         config["last_version_check"] = time.time()
         save_config(config)
+        print(f"{Fore.GREEN}✅ Update check completed!{Style.RESET_ALL}")
+    else:
+        print(f"{Fore.YELLOW}⚠ No files updated. Check network or release URLs.{Style.RESET_ALL}")
 
 def load_config():
     default_config = {
@@ -415,7 +378,12 @@ def load_config():
         "last_version_check": 0,
         "use_steam": False,
         "auto_close_after_inject": False,
-        "notes": ""
+        "selected_injector": "SharpMonoInjector",
+        "available_injectors": [
+            {"name": "SharpMonoInjector", "exe": "smi.exe", "url": "https://api.github.com/repos/D4rkks/r.e.p.o-cheat/releases/latest"},
+            {"name": "ExtremeInjector", "exe": "ExtremeInjector.exe", "url": "https://github.com/master131/ExtremeInjector/releases/latest"},
+            {"name": "Xenos", "exe": "Xenos.exe", "url": "https://github.com/DarthTon/Xenos/releases/latest"}
+        ]
     }
     if os.path.exists("config.json"):
         try:
@@ -442,6 +410,19 @@ def save_config(config):
     except Exception as e:
         print(f"{Fore.RED}❌ Error saving config: {e}{Style.RESET_ALL}")
         logging.error(f"Error saving config: {e}")
+
+def check_injector_available(injector_exe):
+    return os.path.exists(injector_exe)
+
+def get_inject_command(injector_name, injector_exe, target_name, dll_path):
+    if injector_name == "SharpMonoInjector":
+        return f'{injector_exe} inject -p "{target_name}" -a "{dll_path}" -n r.e.p.o_cheat -c Loader -m Init'
+    elif injector_name == "ExtremeInjector":
+        return f'{injector_exe} -p "{target_name}" -i "{dll_path}"'
+    elif injector_name == "Xenos":
+        return f'{injector_exe} -p "{target_name}" -f "{dll_path}"'
+    else:
+        raise ValueError(f"Unsupported injector: {injector_name}")
 
 def is_process_running(config, window_title=None):
     if window_title:
@@ -622,35 +603,49 @@ def perform_injection(config, window_title=None):
     
     print(f"{Fore.YELLOW}💉 Injecting DLL...{Style.RESET_ALL}")
     logging.info(f"Starting injection for DLL: {dll_name}")
-    
+
+    selected_injector = next((inj for inj in config["available_injectors"] if inj["name"] == config["selected_injector"]), None)
+    if not selected_injector or not check_injector_available(selected_injector["exe"]):
+        print(f"{Fore.RED}❌ Selected injector '{config['selected_injector']}' not found or unavailable!{Style.RESET_ALL}")
+        return False
+
+    injector_name = selected_injector["name"]
+    injector_exe = selected_injector["exe"]
+    print(f"{Fore.CYAN}🔧 Using injector: {injector_name} ({injector_exe}){Style.RESET_ALL}")
+
     for repo_name in repo_names:
-        inject_cmd = f'smi.exe inject -p "{repo_name}" -a "{dll_name}" -n r.e.p.o_cheat -c Loader -m Init'
-        logging.info(f"Trying injection with command: {inject_cmd}")
-        
-        result = subprocess.run(inject_cmd, shell=True, capture_output=True, text=True)
-        
-        if result.returncode == 0:
-            print(f"{Fore.GREEN}✅ Injection successful with process/window '{repo_name}'{Style.RESET_ALL}")
-            logging.info(f"Injection successful for {dll_name} into {repo_name}")
-            return True
-        else:
-            print(f"{Fore.YELLOW}⚠ Injection failed with process/window '{repo_name}'. Trying next name...{Style.RESET_ALL}")
-            logging.warning(f"Injection failed with {repo_name}: {result.stderr}")
-    
+        try:
+            inject_cmd = get_inject_command(injector_name, injector_exe, repo_name, dll_name)
+            logging.info(f"Trying injection with command: {inject_cmd}")
+            
+            result = subprocess.run(inject_cmd, shell=True, capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                print(f"{Fore.GREEN}✅ Injection successful with {injector_name} on process/window '{repo_name}'{Style.RESET_ALL}")
+                logging.info(f"Injection successful for {dll_name} into {repo_name} with {injector_name}")
+                return True
+            else:
+                print(f"{Fore.YELLOW}⚠ Injection failed with {injector_name} on '{repo_name}': {result.stderr}{Style.RESET_ALL}")
+                logging.warning(f"Injection failed with {injector_name} on {repo_name}: {result.stderr}")
+        except Exception as e:
+            print(f"{Fore.YELLOW}⚠ Error running {injector_name} on '{repo_name}': {e}{Style.RESET_ALL}")
+            logging.warning(f"Error with {injector_name} on {repo_name}: {e}")
+
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     log_dir = ensure_log_directory()
     log_file = os.path.join(log_dir, f"inject_fail_{timestamp}.log")
     
     with open(log_file, "w") as f:
+        f.write(f"Injector: {injector_name}\n")
         f.write(f"Inject Command Attempts:\n")
         for repo_name in repo_names:
-            cmd = f'smi.exe inject -p "{repo_name}" -a "{dll_name}" -n r.e.p.o_cheat -c Loader -m Init'
+            cmd = get_inject_command(injector_name, injector_exe, repo_name, dll_name)
             f.write(f"{cmd}\n")
         f.write(f"Timestamp: {time.ctime()}\n")
         f.write(f"Error Output:\n{result.stderr}\n")
         f.write(f"Standard Output:\n{result.stdout}\n")
     
-    print(f"{Fore.RED}❌ Injection failed with all process names! Error log saved to {log_file}{Style.RESET_ALL}")
+    print(f"{Fore.RED}❌ Injection failed with {injector_name}! Error log saved to {log_file}{Style.RESET_ALL}")
     show_inject_failure(result.stderr, config, log_file)
     return False
 
@@ -961,6 +956,13 @@ def config_gui(config, standalone=False):
     auto_close_var = ttk.BooleanVar(value=config["auto_close_after_inject"])
     Checkbutton(root, text="Auto Close After Inject", variable=auto_close_var).grid(row=4, column=0, columnspan=2, pady=5)
 
+    # Thêm Combobox chọn injector
+    Label(root, text="Injector:").grid(row=5, column=0, padx=5, pady=5)
+    injector_options = [inj["name"] for inj in config["available_injectors"]]
+    injector_var = ttk.StringVar(value=config["selected_injector"])
+    injector_combobox = ttk.Combobox(root, textvariable=injector_var, values=injector_options, state="readonly")
+    injector_combobox.grid(row=5, column=1, padx=5, pady=5, sticky="w")
+
     def save_config_and_close():
         new_repo_path = repo_entry.get() if not config["use_steam"] else ""
         new_dll_path = dll_entry.get()
@@ -975,13 +977,14 @@ def config_gui(config, standalone=False):
         config["auto_inject"] = auto_inject_var.get()
         config["inject_wait_time"] = int(wait_time_entry.get()) if wait_time_entry.get().isdigit() else 10
         config["auto_close_after_inject"] = auto_close_var.get()
+        config["selected_injector"] = injector_var.get()
         save_config(config)
         root.destroy()
 
     if standalone:
-        ttk.Button(root, text="Save", command=save_config_and_close, style="Accent.TButton").grid(row=5, column=0, columnspan=4, pady=10)
+        ttk.Button(root, text="Save", command=save_config_and_close, style="Accent.TButton").grid(row=6, column=0, columnspan=4, pady=10)
     else:
-        ttk.Button(root, text="Save & Start", command=save_config_and_close, style="Accent.TButton").grid(row=5, column=0, columnspan=4, pady=10)
+        ttk.Button(root, text="Save & Start", command=save_config_and_close, style="Accent.TButton").grid(row=6, column=0, columnspan=4, pady=10)
 
     root.protocol("WM_DELETE_WINDOW", lambda: root.destroy() if standalone else sys.exit(1))
     root.mainloop()
