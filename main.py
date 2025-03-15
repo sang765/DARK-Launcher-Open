@@ -16,6 +16,8 @@ import glob
 import win32gui
 import win32con
 import win32api
+import py7zr
+import rarfile
 from concurrent.futures import ThreadPoolExecutor
 from tkinter import filedialog, messagebox, Tk, Label, Checkbutton, Entry, simpledialog
 import ttkbootstrap as ttk
@@ -309,6 +311,26 @@ def write_version_file(version, title, files):
             f.write(f"{filename} {size}\n")
         f.write("-------------------------\n")
 
+def extract_7z(file_path, extract_dir):
+    """Giải nén file .7z"""
+    try:
+        with py7zr.SevenZipFile(file_path, mode='r') as z:
+            z.extractall(extract_dir)
+        return True
+    except Exception as e:
+        print(f"{Fore.RED}❌ Error extracting 7z file {file_path}: {e}{Style.RESET_ALL}")
+        return False
+
+def extract_rar(file_path, extract_dir):
+    """Giải nén file .rar"""
+    try:
+        with rarfile.RarFile(file_path) as rf:
+            rf.extractall(extract_dir)
+        return True
+    except Exception as e:
+        print(f"{Fore.RED}❌ Error extracting rar file {file_path}: {e}{Style.RESET_ALL}")
+        return False
+
 def check_and_update(config):
     print(f"{Fore.CYAN}🔍 Checking for updates...{Style.RESET_ALL}")
     logging.info("Checking for updates")
@@ -320,47 +342,72 @@ def check_and_update(config):
         "r.e.p.o.cheat.dll": "https://api.github.com/repos/D4rkks/r.e.p.o-cheat/releases/latest"
     })
 
-    for injector in config["available_injectors"]:
-        injector_exe = injector["exe"]
-        injector_url = injector["url"]
-        injector_name = injector["name"]
+    updated = False
+    temp_dir = "temp_extract"
+    os.makedirs(temp_dir, exist_ok=True)
 
+    for file_name, url in expected_files.items():
+        injector_name = next((inj["name"] for inj in config["available_injectors"] if inj["exe"] == file_name), file_name)
         try:
-            response = requests.get(injector_url)
-            release_info = response.json()
-            github_version = release_info['tag_name']
-            github_title = release_info['name']
-            github_assets = {asset['name']: asset for asset in release_info['assets']}
-
-            if injector_exe not in github_assets:
-                print(f"{Fore.YELLOW}⚠ {injector_exe} not found in release {injector_url}. Skipping update.{Style.RESET_ALL}")
+            response = requests.get(url, timeout=10)
+            if response.status_code != 200:
+                print(f"{Fore.RED}❌ HTTP error {response.status_code} checking {injector_name}: {response.text[:50]}...{Style.RESET_ALL}")
                 continue
 
-            github_size = github_assets[injector_exe]['size']
-            local_size = local_files.get(injector_exe, -1) if local_files else -1
+            release_info = response.json()
+            github_version = release_info.get('tag_name', 'unknown')
+            github_title = release_info.get('name', 'unknown')
+            github_assets = {asset['name']: asset for asset in release_info.get('assets', [])}
 
-            if not os.path.exists(injector_exe) or local_size != github_size or local_version != github_version:
-                print(f"{Fore.YELLOW}🔄 Updating {injector_exe}: Version ({local_version} ≠ {github_version}) or size mismatch (local={local_size}, github={github_size}){Style.RESET_ALL}")
-                if os.path.exists(injector_exe):
-                    os.remove(injector_exe)
-                    print(f"{Fore.RED}🗑️ Deleted old {injector_exe}{Style.RESET_ALL}")
-                download_url = github_assets[injector_exe]['browser_download_url']
-                size = download_file(download_url, injector_exe, config)
-                if size > 0:
-                    if local_files is None:
-                        local_files = {}
-                    local_files[injector_exe] = size
-                    print(f"{Fore.GREEN}✅ Updated {injector_exe} to size {size} bytes{Style.RESET_ALL}")
-                else:
-                    print(f"{Fore.RED}❌ Failed to download {injector_exe}{Style.RESET_ALL}")
+            download_url = None
+            archive_file = None
+            for asset_name, asset in github_assets.items():
+                if file_name in asset_name or asset_name.endswith(('.7z', '.rar')):
+                    download_url = asset['browser_download_url']
+                    archive_file = asset_name
+                    break
+
+            if not download_url:
+                print(f"{Fore.YELLOW}⚠ No suitable asset found for {file_name} in release {url}{Style.RESET_ALL}")
+                continue
+
+            temp_archive = os.path.join(temp_dir, archive_file)
+            size = download_file(download_url, temp_archive, config)
+            if size == 0:
+                print(f"{Fore.RED}❌ Failed to download {archive_file}{Style.RESET_ALL}")
+                continue
+
+            if archive_file.endswith('.7z'):
+                if extract_7z(temp_archive, temp_dir):
+                    print(f"{Fore.GREEN}✅ Extracted {archive_file}{Style.RESET_ALL}")
+            elif archive_file.endswith('.rar'):
+                if extract_rar(temp_archive, temp_dir):
+                    print(f"{Fore.GREEN}✅ Extracted {archive_file}{Style.RESET_ALL}")
             else:
-                print(f"{Fore.GREEN}✅ {injector_exe} is up to date (version {github_version}){Style.RESET_ALL}")
+                print(f"{Fore.YELLOW}⚠ Unsupported archive format: {archive_file}{Style.RESET_ALL}")
+                continue
+
+            extracted_file = os.path.join(temp_dir, file_name)
+            if os.path.exists(extracted_file):
+                if os.path.exists(file_name):
+                    os.remove(file_name)
+                shutil.move(extracted_file, file_name)
+                file_size = os.path.getsize(file_name)
+                if local_files is None:
+                    local_files = {}
+                local_files[file_name] = file_size
+                updated = True
+                print(f"{Fore.GREEN}✅ Updated {file_name} to size {file_size} bytes{Style.RESET_ALL}")
+            else:
+                print(f"{Fore.YELLOW}⚠ {file_name} not found in archive {archive_file}{Style.RESET_ALL}")
 
         except requests.RequestException as e:
             print(f"{Fore.RED}❌ Network error checking {injector_name}: {e}{Style.RESET_ALL}")
             logging.error(f"Network error checking {injector_name}: {e}")
 
-    if local_files:
+    shutil.rmtree(temp_dir, ignore_errors=True)
+
+    if updated and local_files:
         write_version_file(github_version, github_title, local_files)
         config["last_version_check"] = time.time()
         save_config(config)
@@ -381,8 +428,8 @@ def load_config():
         "selected_injector": "SharpMonoInjector",
         "available_injectors": [
             {"name": "SharpMonoInjector", "exe": "smi.exe", "url": "https://api.github.com/repos/D4rkks/r.e.p.o-cheat/releases/latest"},
-            {"name": "ExtremeInjector", "exe": "ExtremeInjector.exe", "url": "https://github.com/master131/ExtremeInjector/releases/latest"},
-            {"name": "Xenos", "exe": "Xenos.exe", "url": "https://github.com/DarthTon/Xenos/releases/latest"}
+            {"name": "ExtremeInjector", "exe": "ExtremeInjector.exe", "url": "https://api.github.com/repos/master131/ExtremeInjector/releases/latest"},
+            {"name": "Xenos", "exe": "Xenos.exe", "url": "https://api.github.com/repos/DarthTon/Xenos/releases/latest"}
         ]
     }
     if os.path.exists("config.json"):

@@ -95,7 +95,7 @@ def upload_to_donarev419(file_path, skip_on_error=False):
     try:
         with open(file_path, "rb") as f:
             files = {"file": (os.path.basename(file_path), f)}
-            logger.info(f"Uploading {file_path} to donarev419.com...")
+            logger.info(f"Uploading {file_path} to your hosting...")
             response = requests.post(url, headers=headers, files=files, timeout=30)
         
         if response.status_code == 200:
