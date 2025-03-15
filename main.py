@@ -373,9 +373,12 @@ def save_config(config):
         logging.error(f"Error saving config: {e}")
 
 def is_process_running(process_name):
+    possible_names = ["repo", "r.e.p.o", "r.e.p.o."]
     for proc in psutil.process_iter(['name']):
-        if process_name.lower() in proc.info['name'].lower():
-            return True
+        proc_name = proc.info['name'].lower()
+        for name in possible_names:
+            if name in proc_name:
+                return True
     return False
 
 def wait_for_process(process_name, timeout=30):
@@ -468,8 +471,7 @@ def ensure_log_directory():
 
 def perform_injection(config):
     dll_name = os.path.basename(config["dll_path"])
-    repo_name = "REPO"
-    inject_cmd = f'smi.exe inject -p {repo_name} -a "{dll_name}" -n r.e.p.o_cheat -c Loader -m Init'
+    repo_names = ["REPO", "R.E.P.O."]
     
     disclaimer = (
         f"{Fore.YELLOW}⚠ DISCLAIMER: This is just an \"automated\" launcher. Any inject failure issues are due to "
@@ -479,28 +481,38 @@ def perform_injection(config):
     print(disclaimer)
     
     print(f"{Fore.YELLOW}💉 Injecting DLL...{Style.RESET_ALL}")
-    logging.info(f"Starting injection: {inject_cmd}")
+    logging.info(f"Starting injection for DLL: {dll_name}")
     
-    result = subprocess.run(inject_cmd, shell=True, capture_output=True, text=True)
-    
-    if result.returncode != 0:
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        log_dir = ensure_log_directory()
-        log_file = os.path.join(log_dir, f"inject_fail_{timestamp}.log")
+    for repo_name in repo_names:
+        inject_cmd = f'smi.exe inject -p "{repo_name}" -a "{dll_name}" -n r.e.p.o_cheat -c Loader -m Init'
+        logging.info(f"Trying injection with command: {inject_cmd}")
         
-        with open(log_file, "w") as f:
-            f.write(f"Inject Command: {inject_cmd}\n")
-            f.write(f"Timestamp: {time.ctime()}\n")
-            f.write(f"Error Output:\n{result.stderr}\n")
-            f.write(f"Standard Output:\n{result.stdout}\n")
+        result = subprocess.run(inject_cmd, shell=True, capture_output=True, text=True)
         
-        print(f"{Fore.RED}❌ Injection failed! Error log saved to {log_file}{Style.RESET_ALL}")
-        show_inject_failure(result.stderr, config, log_file)
-        return False
+        if result.returncode == 0:
+            print(f"{Fore.GREEN}✅ Injection successful with process '{repo_name}'{Style.RESET_ALL}")
+            logging.info(f"Injection successful for {dll_name} into {repo_name}")
+            return True
+        else:
+            print(f"{Fore.YELLOW}⚠ Injection failed with process '{repo_name}'. Trying next name...{Style.RESET_ALL}")
+            logging.warning(f"Injection failed with {repo_name}: {result.stderr}")
     
-    print(f"{Fore.GREEN}✅ Injection successful{Style.RESET_ALL}")
-    logging.info(f"Injection successful for {dll_name} into {repo_name}")
-    return True
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    log_dir = ensure_log_directory()
+    log_file = os.path.join(log_dir, f"inject_fail_{timestamp}.log")
+    
+    with open(log_file, "w") as f:
+        f.write(f"Inject Command Attempts:\n")
+        for repo_name in repo_names:
+            cmd = f'smi.exe inject -p "{repo_name}" -a "{dll_name}" -n r.e.p.o_cheat -c Loader -m Init'
+            f.write(f"{cmd}\n")
+        f.write(f"Timestamp: {time.ctime()}\n")
+        f.write(f"Error Output:\n{result.stderr}\n")
+        f.write(f"Standard Output:\n{result.stdout}\n")
+    
+    print(f"{Fore.RED}❌ Injection failed with all process names! Error log saved to {log_file}{Style.RESET_ALL}")
+    show_inject_failure(result.stderr, config, log_file)
+    return False
 
 def download_dll(url, config):
     filename = os.path.basename(url) if url.endswith('.dll') else "downloaded.dll"
@@ -530,7 +542,8 @@ usage = {
     "auto_inject": "auto_inject (-aj) [True/False] [time]: Toggle or set auto inject.",
     "inject_wait_time": "inject_wait_time (-iwt): Open UI to set inject wait time.",
     "status": "status (-s): Show current configuration and game status.",
-    "download_dll": "download_dll (-ddl) <url>: Download a DLL from a URL."
+    "download_dll": "download_dll (-ddl) <url>: Download a DLL from a URL.",
+    "config": "config (-c): Open the configuration GUI to modify settings."
 }
 
 def show_usage(command, config):
@@ -660,13 +673,19 @@ def handle_commands(command, config):
             print(f"  Auto Inject Failed: {config.get('auto_inject_failed', False)}")
             print(f"  Auto Close After Inject: {config['auto_close_after_inject']}")
             print(f"  Last Version Check: {int(time.time() - config['last_version_check'])}s ago")
-            print(f"  Notes: {config.get('notes', 'No notes')}")
 
         elif action in ("download_dll", "-ddl"):
             if len(parts) != 2:
                 show_usage("download_dll", config)
             else:
                 download_dll(parts[1], config)
+
+        elif action in ("config", "-c"):
+            if len(parts) > 1:
+                show_usage("config", config)
+            else:
+                print(f"{Fore.GREEN}✅ Configuration GUI opened. Changes will be saved upon clicking 'Save'.{Style.RESET_ALL}")
+                config_gui(config, standalone=True)
 
         else:
             show_usage(cmd, config)
@@ -734,9 +753,10 @@ def apply_theme(root, wallpaper_path=None, initial=False):
 def select_file(title, filetypes):
     return filedialog.askopenfilename(title=title, filetypes=filetypes)
 
-def config_gui(config):
+def config_gui(config, standalone=False):
     root = Tk()
-    root.title("Setup")
+    root.title("Setup Config GUI")
+    root.resizable(False, False)
     icon_path = setup_icon()
     if icon_path:
         try:
@@ -801,7 +821,7 @@ def config_gui(config):
     auto_close_var = ttk.BooleanVar(value=config["auto_close_after_inject"])
     Checkbutton(root, text="Auto Close After Inject", variable=auto_close_var).grid(row=4, column=0, columnspan=2, pady=5)
 
-    def save_and_close():
+    def save_config_and_close():
         new_repo_path = repo_entry.get() if not config["use_steam"] else ""
         new_dll_path = dll_entry.get()
         if not new_dll_path or not os.path.exists(new_dll_path) or not is_valid_dll(new_dll_path):
@@ -818,8 +838,12 @@ def config_gui(config):
         save_config(config)
         root.destroy()
 
-    ttk.Button(root, text="Save & Start", command=save_and_close, style="Accent.TButton").grid(row=5, column=0, columnspan=4, pady=10)
-    root.protocol("WM_DELETE_WINDOW", lambda: sys.exit(1))
+    if standalone:
+        ttk.Button(root, text="Save", command=save_config_and_close, style="Accent.TButton").grid(row=5, column=0, columnspan=4, pady=10)
+    else:
+        ttk.Button(root, text="Save & Start", command=save_config_and_close, style="Accent.TButton").grid(row=5, column=0, columnspan=4, pady=10)
+
+    root.protocol("WM_DELETE_WINDOW", lambda: root.destroy() if standalone else sys.exit(1))
     root.mainloop()
     return config
 
@@ -920,27 +944,45 @@ def main():
                 break
 
         repo_name = "REPO"
-        if not is_process_running(repo_name):
+        game_already_running = is_process_running(repo_name)
+
+        if not game_already_running:
             if not NO_CONSOLE_MODE:
                 print(f"{Fore.YELLOW}🚀 Game not running. Starting REPO.exe...{Style.RESET_ALL}")
             start_game(config)
             if wait_for_process(repo_name):
                 if not NO_CONSOLE_MODE:
                     print(f"{Fore.GREEN}✅ REPO detected.{Style.RESET_ALL}")
+                if config["auto_inject"]:
+                    if not NO_CONSOLE_MODE:
+                        print(f"{Fore.GREEN}✅ REPO started, waiting {config['inject_wait_time']} seconds before injection...{Style.RESET_ALL}")
+                    time.sleep(config["inject_wait_time"])
+                    if perform_injection(config):
+                        if not NO_CONSOLE_MODE:
+                            show_inject_success(config)
+                            print(f"{Fore.GREEN}🎉 DLL has been successfully injected via auto_inject!{Style.RESET_ALL}")
+                        if NO_CONSOLE_MODE or config["auto_close_after_inject"]:
+                            sys.exit(0)
+                    else:
+                        config["auto_inject_failed"] = True
+                        config["auto_inject"] = False
+                        save_config(config)
+                        if not NO_CONSOLE_MODE:
+                            print(f"{Fore.RED}❌ Auto injection failed. Disabled auto_inject.{Style.RESET_ALL}")
             else:
                 if not NO_CONSOLE_MODE:
                     print(f"{Fore.RED}❌ REPO.exe did not start within timeout.{Style.RESET_ALL}")
-
-        if config["auto_inject"]:
-            if is_process_running(repo_name):
+        else:
+            if not NO_CONSOLE_MODE:
+                print(f"{Fore.GREEN}✅ REPO or R.E.P.O. is already running.{Style.RESET_ALL}")
+            if config["auto_inject"]:
                 if not NO_CONSOLE_MODE:
-                    print(f"{Fore.GREEN}✅ REPO detected, waiting {config['inject_wait_time']} seconds before injection...{Style.RESET_ALL}")
-                time.sleep(config["inject_wait_time"])
+                    print(f"{Fore.GREEN}✅ Game already running, injecting immediately...{Style.RESET_ALL}")
                 if perform_injection(config):
                     if not NO_CONSOLE_MODE:
                         show_inject_success(config)
-                        print(f"{Fore.GREEN}🎉 DLL has been successfully injected into {repo_name} via auto_inject!{Style.RESET_ALL}")
-                    if NO_CONSOLE_MODE:
+                        print(f"{Fore.GREEN}🎉 DLL has been successfully injected via auto_inject!{Style.RESET_ALL}")
+                    if NO_CONSOLE_MODE or config["auto_close_after_inject"]:
                         sys.exit(0)
                 else:
                     config["auto_inject_failed"] = True
