@@ -688,7 +688,7 @@ def handle_commands(command, config):
             print(f"  Game Running: {is_process_running('REPO')}")
             print(f"  Auto Inject Failed: {config.get('auto_inject_failed', False)}")
             print(f"  Auto Close After Inject: {config['auto_close_after_inject']}")
-            print(f"  Channel: {config['channel']}")  # Thêm thông tin channel
+            print(f"  Channel: {config['channel']}")
             print(f"  Last Version Check: {int(time.time() - config['last_version_check'])}s ago")
 
         elif action in ("download_dll", "-ddl"):
@@ -853,7 +853,7 @@ def config_gui(config, standalone=False, first_launch=False):
             messagebox.showerror("Error", "Invalid or missing REPO path!")
             return
         config["repo_path"] = new_repo_path
-        config["dll_path"] = new_dll_path if not first_launch else ""  # Để trống trong lần đầu
+        config["dll_path"] = new_dll_path if not first_launch else ""
         config["auto_inject"] = auto_inject_var.get()
         config["inject_wait_time"] = int(wait_time_entry.get()) if wait_time_entry.get().isdigit() else 10
         config["auto_close_after_inject"] = auto_close_var.get()
