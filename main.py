@@ -1,6 +1,7 @@
 import os
 import time
 import json
+import tkinter
 import requests
 import subprocess
 import sys
@@ -31,6 +32,11 @@ NO_CONSOLE_MODE = "--no-console" in sys.argv
 
 DWMWA_USE_IMMERSIVE_DARK_MODE = 20
 DWMWA_MICA_EFFECT = 1029
+
+NAMESPACE_MAPPING = {
+    "Stable": "r.e.p.o_cheat",
+    "Beta": "dark_cheat"
+}
 
 def resource_path(relative_path):
     try:
@@ -130,12 +136,12 @@ def run_as_admin():
     else:
         print(f"{Fore.GREEN}✅ Running with admin.{Style.RESET_ALL}")
 
-def get_latest_release(config):
+def get_latest_release(config, channel_override=None):
     channels = {
         "Stable": "https://api.github.com/repos/D4rkks/r.e.p.o-cheat/releases/latest",
         "Beta": "https://api.github.com/repos/peeberpoober/beta-r.e.p.o-cheat/releases/latest"
     }
-    url = channels.get(config["channel"], channels["Stable"])
+    url = channels.get(channel_override or config["channel"], channels["Stable"])
     try:
         response = requests.get(url)
         if response.status_code != 200:
@@ -261,7 +267,11 @@ def check_and_update(config):
     github_assets = {asset['name']: asset for asset in latest_release['assets']}
     
     local_version, local_title, local_files = parse_version_file()
-    expected_files = ["smi.exe", "SharpMonoInjector.dll", "r.e.p.o.cheat.dll"]
+    
+    if config["channel"] == "Stable":
+        expected_files = ["smi.exe", "SharpMonoInjector.dll", "r.e.p.o.cheat.dll"]
+    else:
+        expected_files = ["dark_cheat.dll"]
 
     print(f"{Fore.CYAN}🔍 Checking for updates...{Style.RESET_ALL}")
     logging.info("Checking for updates")
@@ -281,6 +291,8 @@ def check_and_update(config):
                 size = download_file(download_url, filename, config)
                 new_files[filename] = size
                 logging.info(f"Downloaded {filename}, size={size}")
+            else:
+                print(f"{Fore.YELLOW}⚠ File {filename} not found in GitHub release for {config['channel']} channel.{Style.RESET_ALL}")
         write_version_file(github_version, github_title, new_files)
         config["last_version_check"] = time.time()
         save_config(config)
@@ -496,11 +508,13 @@ def perform_injection(config):
     )
     print(disclaimer)
     
-    print(f"{Fore.YELLOW}💉 Injecting DLL...{Style.RESET_ALL}")
-    logging.info(f"Starting injection for DLL: {dll_name}")
+    namespace = NAMESPACE_MAPPING.get(config["channel"], "r.e.p.o_cheat")
+    
+    print(f"{Fore.YELLOW}💉 Injecting DLL with namespace '{namespace}'...{Style.RESET_ALL}")
+    logging.info(f"Starting injection for DLL: {dll_name} with namespace: {namespace}")
     
     for repo_name in repo_names:
-        inject_cmd = f'smi.exe inject -p "{repo_name}" -a "{dll_name}" -n r.e.p.o_cheat -c Loader -m Init'
+        inject_cmd = f'smi.exe inject -p "{repo_name}" -a "{dll_name}" -n {namespace} -c Loader -m Init'
         logging.info(f"Trying injection with command: {inject_cmd}")
         
         result = subprocess.run(inject_cmd, shell=True, capture_output=True, text=True)
@@ -520,7 +534,7 @@ def perform_injection(config):
     with open(log_file, "w") as f:
         f.write(f"Inject Command Attempts:\n")
         for repo_name in repo_names:
-            cmd = f'smi.exe inject -p "{repo_name}" -a "{dll_name}" -n r.e.p.o_cheat -c Loader -m Init'
+            cmd = f'smi.exe inject -p "{repo_name}" -a "{dll_name}" -n {namespace} -c Loader -m Init'
             f.write(f"{cmd}\n")
         f.write(f"Timestamp: {time.ctime()}\n")
         f.write(f"Error Output:\n{result.stderr}\n")
@@ -739,7 +753,11 @@ def apply_mica_effect(hwnd):
     dwm.DwmSetWindowAttribute(hwnd, DWMWA_MICA_EFFECT, ctypes.byref(mica_enabled), ctypes.sizeof(mica_enabled))
 
 def apply_theme(root, wallpaper_path=None, initial=False):
-    if not root.winfo_exists():
+    try:
+        if not root.winfo_exists():
+            return
+    except tkinter.TclError:
+        print(f"{Fore.YELLOW}⚠ Window already destroyed. Skipping theme application.{Style.RESET_ALL}")
         return
     
     style = ttk.Style()
@@ -764,111 +782,146 @@ def apply_theme(root, wallpaper_path=None, initial=False):
         except Exception as e:
             print(f"{Fore.YELLOW}⚠ Could not load wallpaper: {e}{Style.RESET_ALL}")
     
-    hwnd = win32gui.GetParent(root.winfo_id())
-    apply_mica_effect(hwnd)
+    try:
+        hwnd = win32gui.GetParent(root.winfo_id())
+        apply_mica_effect(hwnd)
+    except tkinter.TclError:
+        print(f"{Fore.YELLOW}⚠ Window destroyed before applying Mica effect.{Style.RESET_ALL}")
 
 def select_file(title, filetypes):
     return filedialog.askopenfilename(title=title, filetypes=filetypes)
 
-def config_gui(config, standalone=False, first_launch=False):
-    root = Tk()
-    root.title("Setup Config GUI")
-    root.resizable(False, False)
-    icon_path = setup_icon()
-    if icon_path:
-        try:
-            root.iconbitmap(icon_path)
-        except Exception as e:
-            print(f"{Fore.YELLOW}⚠ Failed to load icon at {icon_path}: {e}{Style.RESET_ALL}")
+def download_stable_injector_files(config):
+    stable_channel = "Stable"
+    latest_release = get_latest_release(config, channel_override=stable_channel)
+    if not latest_release:
+        print(f"{Fore.RED}❌ Could not fetch Stable release for injector files. Skipping...{Style.RESET_ALL}")
+        return False
 
-    wallpaper_path = get_windows_wallpaper()
-    apply_theme(root, wallpaper_path, initial=True)
+    github_assets = {asset['name']: asset for asset in latest_release['assets']}
+    injector_files = ["smi.exe", "SharpMonoInjector.dll"]
 
-    game_label = Label(root, text="Game Path:")
-    game_label.grid(row=0, column=0, padx=5, pady=5)
-    repo_entry = ttk.Entry(root, width=50)
-    repo_entry.grid(row=0, column=1, padx=5, pady=5)
-    repo_entry.insert(0, config.get("repo_path", ""))
-    browse_button = ttk.Button(root, text="Browse", command=lambda: [repo_entry.configure(state="normal"), repo_entry.delete(0, END), repo_entry.insert(0, select_file("Select REPO.exe", [("Executable files", "*.exe")])), config.update({"use_steam": False})], style="Outline.TButton")
-    browse_button.grid(row=0, column=2, padx=5, pady=5)
-
-    def toggle_game_source():
-        if config["use_steam"]:
-            repo_entry.configure(state="normal")
-            browse_button.grid()
-            steam_local_button.config(text="Steam Game")
-            config["use_steam"] = False
-            repo_entry.delete(0, END)
-            repo_entry.insert(0, config.get("repo_path", ""))
+    success = True
+    for filename in injector_files:
+        if filename in github_assets:
+            download_url = github_assets[filename]['browser_download_url']
+            size = download_file(download_url, filename, config)
+            if size > 0:
+                print(f"{Fore.GREEN}✅ Downloaded {filename} successfully.{Style.RESET_ALL}")
+                logging.info(f"Downloaded {filename}, size={size}")
+            else:
+                print(f"{Fore.RED}❌ Failed to download {filename}.{Style.RESET_ALL}")
+                success = False
         else:
+            print(f"{Fore.YELLOW}⚠ {filename} not found in Stable release.{Style.RESET_ALL}")
+            success = False
+    
+    return success
+
+def config_gui(config, standalone=False, first_launch=False):
+    try:
+        root = Tk()
+        root.title("Setup Config GUI")
+        root.resizable(False, False)
+        icon_path = setup_icon()
+        if icon_path:
+            try:
+                root.iconbitmap(icon_path)
+            except Exception as e:
+                print(f"{Fore.YELLOW}⚠ Failed to load icon at {icon_path}: {e}{Style.RESET_ALL}")
+
+        wallpaper_path = get_windows_wallpaper()
+        apply_theme(root, wallpaper_path, initial=True)
+
+        game_label = Label(root, text="Game Path:")
+        game_label.grid(row=0, column=0, padx=5, pady=5)
+        repo_entry = ttk.Entry(root, width=50)
+        repo_entry.grid(row=0, column=1, padx=5, pady=5)
+        repo_entry.insert(0, config.get("repo_path", ""))
+        browse_button = ttk.Button(root, text="Browse", command=lambda: [repo_entry.configure(state="normal"), repo_entry.delete(0, END), repo_entry.insert(0, select_file("Select REPO.exe", [("Executable files", "*.exe")])), config.update({"use_steam": False})], style="Outline.TButton")
+        browse_button.grid(row=0, column=2, padx=5, pady=5)
+
+        def toggle_game_source():
+            if config["use_steam"]:
+                repo_entry.configure(state="normal")
+                browse_button.grid()
+                steam_local_button.config(text="Steam Game")
+                config["use_steam"] = False
+                repo_entry.delete(0, END)
+                repo_entry.insert(0, config.get("repo_path", ""))
+            else:
+                repo_entry.delete(0, END)
+                repo_entry.insert(0, "Start with Steam")
+                repo_entry.configure(state="disabled")
+                browse_button.grid_remove()
+                steam_local_button.config(text="Local Game")
+                config["use_steam"] = True
+
+        steam_local_button = ttk.Button(root, text="Steam Game" if not config["use_steam"] else "Local Game", command=toggle_game_source, style="Outline.TButton")
+        steam_local_button.grid(row=0, column=3, padx=5, pady=5)
+
+        if config["use_steam"]:
             repo_entry.delete(0, END)
             repo_entry.insert(0, "Start with Steam")
             repo_entry.configure(state="disabled")
             browse_button.grid_remove()
-            steam_local_button.config(text="Local Game")
-            config["use_steam"] = True
 
-    steam_local_button = ttk.Button(root, text="Steam Game" if not config["use_steam"] else "Local Game", command=toggle_game_source, style="Outline.TButton")
-    steam_local_button.grid(row=0, column=3, padx=5, pady=5)
+        Label(root, text="DLL Path:").grid(row=1, column=0, padx=5, pady=5)
+        dll_entry = ttk.Entry(root, width=50)
+        dll_entry.grid(row=1, column=1, padx=5, pady=5)
+        default_dll = os.path.abspath("r.e.p.o.cheat.dll")
+        if os.path.exists(default_dll) and is_valid_dll(default_dll):
+            dll_entry.insert(0, default_dll)
+        else:
+            dll_entry.insert(0, config.get("dll_path", ""))
+        ttk.Button(root, text="Browse", command=lambda: [dll_entry.delete(0, END), dll_entry.insert(0, select_file("Select DLL file", [("DLL files", "*.dll")]))], style="Outline.TButton").grid(row=1, column=2, padx=5, pady=5)
 
-    if config["use_steam"]:
-        repo_entry.delete(0, END)
-        repo_entry.insert(0, "Start with Steam")
-        repo_entry.configure(state="disabled")
-        browse_button.grid_remove()
+        auto_inject_var = ttk.BooleanVar(value=config["auto_inject"])
+        Checkbutton(root, text="Auto Inject", variable=auto_inject_var).grid(row=2, column=0, columnspan=2, pady=5)
 
-    Label(root, text="DLL Path:").grid(row=1, column=0, padx=5, pady=5)
-    dll_entry = ttk.Entry(root, width=50)
-    dll_entry.grid(row=1, column=1, padx=5, pady=5)
-    default_dll = os.path.abspath("r.e.p.o.cheat.dll")
-    if os.path.exists(default_dll) and is_valid_dll(default_dll):
-        dll_entry.insert(0, default_dll)
-    else:
-        dll_entry.insert(0, config.get("dll_path", ""))
-    ttk.Button(root, text="Browse", command=lambda: [dll_entry.delete(0, END), dll_entry.insert(0, select_file("Select DLL file", [("DLL files", "*.dll")]))], style="Outline.TButton").grid(row=1, column=2, padx=5, pady=5)
+        Label(root, text="Inject Wait Time (seconds):").grid(row=3, column=0, padx=5, pady=5)
+        wait_time_entry = ttk.Entry(root, width=10)
+        wait_time_entry.grid(row=3, column=1, padx=5, pady=5, sticky="w")
+        wait_time_entry.insert(0, config["inject_wait_time"])
 
-    auto_inject_var = ttk.BooleanVar(value=config["auto_inject"])
-    Checkbutton(root, text="Auto Inject", variable=auto_inject_var).grid(row=2, column=0, columnspan=2, pady=5)
+        auto_close_var = ttk.BooleanVar(value=config["auto_close_after_inject"])
+        Checkbutton(root, text="Auto Close After Inject", variable=auto_close_var).grid(row=4, column=0, columnspan=2, pady=5)
+        
+        Label(root, text="Release Channel:").grid(row=5, column=0, padx=5, pady=5)
+        channel_var = ttk.StringVar(value=config.get("channel", "Stable"))
+        channel_combo = ttk.Combobox(root, textvariable=channel_var, values=["Stable", "Beta"], state="readonly", width=10)
+        channel_combo.grid(row=5, column=1, padx=5, pady=5, sticky="w")
 
-    Label(root, text="Inject Wait Time (seconds):").grid(row=3, column=0, padx=5, pady=5)
-    wait_time_entry = ttk.Entry(root, width=10)
-    wait_time_entry.grid(row=3, column=1, padx=5, pady=5, sticky="w")
-    wait_time_entry.insert(0, config["inject_wait_time"])
+        def save_config_and_close():
+            new_repo_path = repo_entry.get() if not config["use_steam"] else ""
+            new_dll_path = dll_entry.get()
+            if not first_launch and (not new_dll_path or not os.path.exists(new_dll_path) or not is_valid_dll(new_dll_path)):
+                messagebox.showerror("Error", "Invalid or missing DLL path!")
+                return
+            if not config["use_steam"] and (not new_repo_path or not os.path.exists(new_repo_path)):
+                messagebox.showerror("Error", "Invalid or missing REPO path!")
+                return
+            config["repo_path"] = new_repo_path
+            config["dll_path"] = new_dll_path if not first_launch else ""
+            config["auto_inject"] = auto_inject_var.get()
+            config["inject_wait_time"] = int(wait_time_entry.get()) if wait_time_entry.get().isdigit() else 10
+            config["auto_close_after_inject"] = auto_close_var.get()
+            config["channel"] = channel_var.get()
+            save_config(config)
+            root.destroy()
 
-    auto_close_var = ttk.BooleanVar(value=config["auto_close_after_inject"])
-    Checkbutton(root, text="Auto Close After Inject", variable=auto_close_var).grid(row=4, column=0, columnspan=2, pady=5)
-    
-    Label(root, text="Release Channel:").grid(row=5, column=0, padx=5, pady=5)
-    channel_var = ttk.StringVar(value=config.get("channel", "Stable"))
-    channel_combo = ttk.Combobox(root, textvariable=channel_var, values=["Stable", "Beta"], state="readonly", width=10)
-    channel_combo.grid(row=5, column=1, padx=5, pady=5, sticky="w")
+        if standalone:
+            ttk.Button(root, text="Save", command=save_config_and_close, style="Accent.TButton").grid(row=6, column=0, columnspan=4, pady=10)
+        else:
+            ttk.Button(root, text="Save & Start", command=save_config_and_close, style="Accent.TButton").grid(row=6, column=0, columnspan=4, pady=10)
 
-    def save_config_and_close():
-        new_repo_path = repo_entry.get() if not config["use_steam"] else ""
-        new_dll_path = dll_entry.get()
-        if not first_launch and (not new_dll_path or not os.path.exists(new_dll_path) or not is_valid_dll(new_dll_path)):
-            messagebox.showerror("Error", "Invalid or missing DLL path!")
-            return
-        if not config["use_steam"] and (not new_repo_path or not os.path.exists(new_repo_path)):
-            messagebox.showerror("Error", "Invalid or missing REPO path!")
-            return
-        config["repo_path"] = new_repo_path
-        config["dll_path"] = new_dll_path if not first_launch else ""
-        config["auto_inject"] = auto_inject_var.get()
-        config["inject_wait_time"] = int(wait_time_entry.get()) if wait_time_entry.get().isdigit() else 10
-        config["auto_close_after_inject"] = auto_close_var.get()
-        config["channel"] = channel_var.get()
-        save_config(config)
-        root.destroy()
-
-    if standalone:
-        ttk.Button(root, text="Save", command=save_config_and_close, style="Accent.TButton").grid(row=6, column=0, columnspan=4, pady=10)
-    else:
-        ttk.Button(root, text="Save & Start", command=save_config_and_close, style="Accent.TButton").grid(row=6, column=0, columnspan=4, pady=10)
-
-    root.protocol("WM_DELETE_WINDOW", lambda: root.destroy() if standalone else sys.exit(1))
-    root.mainloop()
-    return config
+        root.protocol("WM_DELETE_WINDOW", lambda: root.destroy() if standalone else sys.exit(1))
+        root.mainloop()
+        return config
+    except Exception as e:
+        print(f"{Fore.RED}❌ Error in config_gui: {e}{Style.RESET_ALL}")
+        logging.error(f"Error in config_gui: {e}", exc_info=True)
+        return config
 
 def handle_commands_loop(config):
     print(f"{Fore.YELLOW}⚙ Enter commands below (type 'help' for list, 'exit' to quit):{Style.RESET_ALL}")
@@ -942,27 +995,31 @@ def main():
         first_launch = not os.path.exists("config.json")
         if first_launch:
             if not NO_CONSOLE_MODE:
-                print(f"{Fore.YELLOW}⚠ First launch detected. Opening configuration GUI to select channel...{Style.RESET_ALL}")
+                print(f"{Fore.YELLOW}⚠ First launch detected. Downloading injector files from Stable channel...{Style.RESET_ALL}")
+            download_stable_injector_files(config)
+            if not NO_CONSOLE_MODE:
+                print(f"{Fore.YELLOW}⚠ Opening configuration GUI to select channel...{Style.RESET_ALL}")
             config = config_gui(config, first_launch=True)
             save_config(config)
             if not NO_CONSOLE_MODE:
-                print(f"{Fore.GREEN}✅ Configuration saved. Checking for updates based on selected channel...{Style.RESET_ALL}")
+                print(f"{Fore.GREEN}✅ Configuration saved. Downloading DLL based on selected channel...{Style.RESET_ALL}")
+            check_and_update(config)
         else:
             config = load_config()
+            check_and_update(config)
 
-        check_and_update(config)
         ensure_log_directory()
 
         if first_launch and (not config["dll_path"] or not os.path.exists(config["dll_path"])):
-            default_dll = os.path.abspath("r.e.p.o.cheat.dll")
+            default_dll = os.path.abspath("r.e.p.o.cheat.dll" if config["channel"] == "Stable" else "dark_cheat.dll")
             if os.path.exists(default_dll) and is_valid_dll(default_dll):
                 config["dll_path"] = default_dll
                 save_config(config)
                 if not NO_CONSOLE_MODE:
-                    print(f"{Fore.GREEN}✅ DLL 'r.e.p.o.cheat.dll' automatically selected and saved to config.{Style.RESET_ALL}")
+                    print(f"{Fore.GREEN}✅ DLL '{default_dll}' automatically selected and saved to config.{Style.RESET_ALL}")
             else:
                 if not NO_CONSOLE_MODE:
-                    print(f"{Fore.RED}❌ DLL 'r.e.p.o.cheat.dll' not found after update. Please configure manually.{Style.RESET_ALL}")
+                    print(f"{Fore.RED}❌ DLL '{default_dll}' not found after update. Please configure manually.{Style.RESET_ALL}")
 
         while True:
             if not config["dll_path"] or not os.path.exists(config["dll_path"]) or \
@@ -1034,6 +1091,9 @@ def main():
         if not NO_CONSOLE_MODE:
             handle_commands_loop(config)
 
+    except KeyboardInterrupt:
+        print(f"{Fore.YELLOW}⚠ Program interrupted by user.{Style.RESET_ALL}")
+        sys.exit(0)
     except Exception as e:
         if not NO_CONSOLE_MODE:
             print(f"{Fore.RED}❌ Fatal error occurred: {str(e)}{Style.RESET_ALL}")

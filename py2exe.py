@@ -84,7 +84,7 @@ def manage_backup_limit(backup_path, max_backups):
     except OSError as e:
         logger.error(f"Error managing backups in {backup_path}: {e}")
 
-def upload_to_donarev419(file_path, skip_on_error=False):
+def upload_file(file_path, skip_on_error=False):
     if not CONFIG["upload_url"] or not CONFIG["upload_token"]:
         logger.warning("Missing upload configuration. Skipping upload step.")
         return None, None
@@ -94,18 +94,18 @@ def upload_to_donarev419(file_path, skip_on_error=False):
     
     try:
         with open(file_path, "rb") as f:
-            files = {"file": (os.path.basename(file_path), f)}
+            files = {"files": (os.path.basename(file_path), f)}
             logger.info(f"Uploading {file_path} to your hosting...")
             response = requests.post(url, headers=headers, files=files, timeout=30)
         
         if response.status_code == 200:
             response_data = response.json()
-            download_url = response_data.get("url")
+            download_url = response_data.get("fileURL")
             upload_timestamp = int(time.time())
             if download_url:
                 logger.info(f"Upload successful! URL: {download_url}")
                 return download_url, upload_timestamp
-            logger.warning("Upload succeeded but no URL found in response!")
+            logger.warning("Upload succeeded but no fileURL found in response!")
             return None, None
         logger.error(f"Upload failed: {response.status_code} - {response.text}")
         return None, None if skip_on_error else sys.exit(1)
@@ -124,15 +124,15 @@ def update_release_md(hashes, download_url, timestamp, file_size):
             content = f.read()
         
         hash_keys = {'MD5': hashes['MD5'], 'SHA-1': hashes['SHA-1'], 'SHA-256': hashes['SHA-256']}
-        discord_timestamp = f"<t:{timestamp}>"
+        discord_timestamp = f"<t:{timestamp}:R>"
         new_download_line = f"> - ⬇️ **[Download](<{download_url}>)**"
 
         for key, value in hash_keys.items():
             content = re.sub(rf"> - {key}: \*\*\w+\*\*", f"> - {key}: **{value}**", content)
 
-        content = re.sub(r"> - 🆙 Last update: \*\*<t:\d+>\*\*", f"> - 🆙 Last update: **{discord_timestamp}**", content)
+        content = re.sub(r"> - 🆙 Last update: \*\*<t:\d+:R>\*\*", f"> - 🆙 Last update: **{discord_timestamp}**", content)
         content = re.sub(r"> - 📦 Size: \*\*\d+\.\d+ MB\*\*", f"> - 📦 Size: **{file_size} MB**", content)
-        content = re.sub(r"> - ⬇️ \*\*\[Download\]\(<[^>]+>\)\*\*", new_download_line, content)  # Chỉ thay link download chính
+        content = re.sub(r"> - ⬇️ \*\*\[Download\]\(<[^>]+>\)\*\*", new_download_line, content)
 
         with open(release_md_path, "w", encoding="utf-8") as f:
             f.write(content)
@@ -201,7 +201,7 @@ def backup_and_build(max_backups=None, skip_steps=None):
             if hashes:
                 file_size = get_file_size(source_exe)
                 if not skip_steps.get("upload"):
-                    download_url, upload_timestamp = upload_to_donarev419(source_exe, skip_on_error=True)
+                    download_url, upload_timestamp = upload_file(source_exe, skip_on_error=True)
                     if download_url and upload_timestamp:
                         update_release_md(hashes, download_url, upload_timestamp, file_size)
                     else:
